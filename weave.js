@@ -8,7 +8,7 @@ import os from 'os';
 
 const execAsync = promisify(exec);
 
-// Constants and Configuration
+// ===== CONSTANTS =====
 const VIEWS = {
   MAIN: 'main',
   WORKSPACES: 'workspaces',
@@ -18,16 +18,6 @@ const VIEWS = {
   COMMAND_HISTORY: 'command-history',
   JOB_MENU: 'job-menu',
   JOB_STATUS: 'job-status'
-};
-
-const COMMANDS = {
-  LIST_WORKSPACES: 'fab ls',
-  HELP: 'fab --help',
-  LIST_WORKSPACE: (workspace) => `fab ls "${workspace}.Workspace"`,
-  JOB_START: (workspace, notebook) => `fab job start ${workspace}.Workspace/${notebook}`,
-  JOB_RUN_SYNC: (workspace, notebook) => `fab job run /${workspace}.Workspace/${notebook}`,
-  JOB_STATUS: (workspace, notebook, jobId) => `fab job run-status /${workspace}.Workspace/${notebook} --id ${jobId}`,
-  JOB_LIST: (workspace, notebook) => `fab job run-list /${workspace}.Workspace/${notebook}`
 };
 
 const COLORS = {
@@ -41,14 +31,76 @@ const COLORS = {
   WARNING_BG: 'yellow'
 };
 
-const MENU_OPTIONS = [
-  { label: 'Workspaces', command: COMMANDS.LIST_WORKSPACES, view: VIEWS.WORKSPACES },
-  { label: 'Manual Interactive Shell', action: 'interactive' },
-  { label: 'Command History', action: 'history', view: VIEWS.COMMAND_HISTORY },
-  { label: 'Exit', action: 'exit' }
+const TIMEOUTS = {
+  DEFAULT: 30000,
+  WORKSPACE_LOAD: 15000,
+  JOB_RUN: 600000, // 10 minutes
+  ANIMATION: 500,
+  PROGRESS_UPDATE: 200,
+  RETRY_DELAY: 1000,
+  LOADING_SCREEN: 1500
+};
+
+const LIMITS = {
+  CACHE_TIMEOUT: 300000,
+  MAX_RETRIES: 2,
+  PROGRESS_INCREMENT: 10,
+  PROGRESS_MAX: 90,
+  HISTORY_SIZE: 50,
+  HISTORY_DISPLAY: 10,
+  OUTPUT_PREVIEW: 200
+};
+
+const STATUS_CONFIG = {
+  'Completed': { color: COLORS.SUCCESS, icon: '✅' },
+  'Succeeded': { color: COLORS.SUCCESS, icon: '✅' },
+  'Failed': { color: COLORS.ERROR, icon: '❌' },
+  'InProgress': { color: COLORS.WARNING, icon: '🔄' },
+  'NotStarted': { color: COLORS.WARNING, icon: '⏳' },
+  'Unknown': { color: COLORS.WARNING, icon: '⏳' }
+};
+
+// ===== UI HELPERS =====
+const h = React.createElement;
+
+const createText = (props, text) => h(Text, props, text);
+const createBox = (props, children) => h(Box, props, children);
+const spacer = (key = 'spacer') => h(Box, { key, height: 1 });
+
+const createMenuItem = (label, index, selectedIndex, bgColor = COLORS.HIGHLIGHT_BG) =>
+  createText({
+    key: `menu-item-${index}`,
+    color: index === selectedIndex ? 'black' : 'white',
+    backgroundColor: index === selectedIndex ? bgColor : undefined
+  }, label);
+
+const createErrorDisplay = (error, keyPrefix = '') => [
+  createText({ key: `${keyPrefix}error-title`, color: COLORS.ERROR, bold: true }, '❌ Error:'),
+  createText({ key: `${keyPrefix}error-text`, color: COLORS.ERROR }, error)
 ];
 
-// Configuration management
+const createLoadingDisplay = (message = 'Loading...', keyPrefix = '') =>
+  createText({ key: `${keyPrefix}loading`, color: COLORS.WARNING }, `⏳ ${message}`);
+
+// ===== COMMAND BUILDERS =====
+const CommandBuilder = {
+  listWorkspaces: () => 'fab ls',
+  help: () => 'fab --help',
+  listWorkspace: (workspace) => `fab ls "${workspace}.Workspace"`,
+
+  job: {
+    start: (workspace, notebook) =>
+      `fab job start ${workspace}.Workspace/${notebook}`,
+    runSync: (workspace, notebook) =>
+      `fab job run /${workspace}.Workspace/${notebook}`,
+    status: (workspace, notebook, jobId) =>
+      `fab job run-status /${workspace}.Workspace/${notebook} --id ${jobId}`,
+    list: (workspace, notebook) =>
+      `fab job run-list /${workspace}.Workspace/${notebook}`
+  }
+};
+
+// ===== CONFIGURATION =====
 const CONFIG_DIR = path.join(os.homedir(), '.fabric-tui');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const HISTORY_FILE = path.join(CONFIG_DIR, 'history.json');
@@ -59,7 +111,7 @@ const loadConfig = async () => {
     const data = await fs.readFile(CONFIG_FILE, 'utf8');
     return JSON.parse(data);
   } catch {
-    return { cacheTimeout: 300000, maxRetries: 2, theme: 'default' };
+    return { cacheTimeout: LIMITS.CACHE_TIMEOUT, maxRetries: LIMITS.MAX_RETRIES, theme: 'default' };
   }
 };
 
@@ -68,41 +120,59 @@ const saveConfig = async (config) => {
   await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2));
 };
 
-// Utility Functions
-const utils = {
+// ===== PARSING UTILITIES =====
+const ParsingUtils = {
   cleanOutput: (output) => output
     .replace(/\x1b\[[0-9;]*m/g, '')
     .replace(/\r\n/g, '\n')
     .trim(),
 
-  parseWorkspaces: (output) => output
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line && !line.startsWith('Listing') && !line.startsWith('ID') && !line.startsWith('─'))
-    .map(line => {
-      let workspaceName = line;
-      if (line.includes('.')) {
-        workspaceName = line.split('.')[0];
-      }
-      return workspaceName.trim();
-    })
-    .filter(name => name && name.length > 0),
+  parseLines: (output, filters = {}) => {
+    const defaultFilters = {
+      skipEmpty: true,
+      skipHeaders: true,
+      skipPatterns: ['Listing', 'ID', '─']
+    };
 
-  parseWorkspaceItems: (output) => output
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line && !line.startsWith('Listing') && !line.startsWith('ID') && !line.startsWith('─'))
-    .map(line => line.trim())
-    .filter(item => item && item.length > 0),
+    const { skipEmpty, skipHeaders, skipPatterns } = { ...defaultFilters, ...filters };
 
-  formatJobId: (output) => {
-    // Match pattern: Job instance 'xxxxx-xxxx-xxxx-xxxx-xxxx' created
+    return output
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => {
+        if (skipEmpty && !line) return false;
+        if (skipHeaders && skipPatterns.some(pattern => line.startsWith(pattern))) return false;
+        return true;
+      });
+  },
+
+  parseWorkspaces: (output) => {
+    return ParsingUtils.parseLines(output)
+      .map(line => {
+        if (line.includes('.')) {
+          return line.split('.')[0].trim();
+        }
+        return line.trim();
+      })
+      .filter(name => name && name.length > 0);
+  },
+
+  parseWorkspaceItems: (output) => {
+    return ParsingUtils.parseLines(output)
+      .filter(item => item && item.length > 0);
+  },
+
+  extractJobId: (output) => {
     const match = output.match(/Job instance '([a-f0-9-]+)' created/i);
     return match ? match[1] : null;
   },
 
+  extractGuid: (text) => {
+    const match = text.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/);
+    return match ? match[1] : null;
+  },
+
   parseJobStatus: (output) => {
-    // Parse the table output from job run-status command
     const lines = output.split('\n');
     let statusInfo = {
       status: 'Unknown',
@@ -111,20 +181,13 @@ const utils = {
       jobType: null
     };
 
-    // Look for the data line
     for (const line of lines) {
-      // Skip empty lines, borders, and headers
       if (!line.trim() || line.includes('──────') || line.includes('id') || line.includes('itemId')) continue;
 
-      // Check if line contains a GUID (indicates data row)
-      if (line.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/)) {
-        // Remove table borders if present
+      if (ParsingUtils.extractGuid(line)) {
         const cleanLine = line.replace(/^\s*│\s*/, '').replace(/\s*│\s*$/, '').trim();
 
-        // Try different parsing strategies
-
-        // Strategy 1: Look for specific patterns
-        // Extract status - look for status keywords
+        // Extract status
         const statusMatch = cleanLine.match(/\b(InProgress|Completed|Failed|NotStarted|Succeeded)\b/i);
         if (statusMatch) {
           statusInfo.status = statusMatch[1];
@@ -136,105 +199,58 @@ const utils = {
           statusInfo.jobType = jobTypeMatch[1];
         }
 
-        // Extract timestamps - look for all timestamp patterns
-        const timestamps = cleanLine.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?/g);
+        // Extract timestamps - look for various timestamp formats
+        // Match ISO 8601 with or without timezone, or other common formats
+        const timestamps = cleanLine.match(/\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/g);
         if (timestamps && timestamps.length > 0) {
-          statusInfo.startTime = timestamps[0];
+          // Normalize the timestamp to ensure it's parseable
+          statusInfo.startTime = timestamps[0].replace(' ', 'T');
+          if (!statusInfo.startTime.includes('Z') && !statusInfo.startTime.match(/[+-]\d{2}:?\d{2}$/)) {
+            // If no timezone info, assume UTC
+            statusInfo.startTime += 'Z';
+          }
 
-          // If there's more than one timestamp, the last one is usually the end time
-          if (timestamps.length > 1) {
-            // Don't use endTime if it's "None" or if it's identical to startTime
-            const potentialEndTime = timestamps[timestamps.length - 1];
-            if (potentialEndTime !== statusInfo.startTime && !cleanLine.includes("None")) {
-              statusInfo.endTime = potentialEndTime;
+          if (timestamps.length > 1 && timestamps[timestamps.length - 1] !== timestamps[0]) {
+            statusInfo.endTime = timestamps[timestamps.length - 1].replace(' ', 'T');
+            if (!statusInfo.endTime.includes('Z') && !statusInfo.endTime.match(/[+-]\d{2}:?\d{2}$/)) {
+              statusInfo.endTime += 'Z';
             }
           }
         }
 
-        // Strategy 2: Try splitting by pipes and/or multiple spaces
-        // Always run Strategy 2 to ensure we catch end times even if Strategy 1 found status/start time
-        if (!statusInfo.status || statusInfo.status === 'Unknown' || !statusInfo.startTime || !statusInfo.endTime) {
-          // Try splitting by table separators if present
-          let fields;
-          if (line.includes('|')) {
-            fields = line.split('|').map(f => f.trim()).filter(f => f.length > 0);
-          } else {
-            fields = cleanLine.split(/\s{2,}/).filter(f => f.trim().length > 0);
-          }
-
-          // Look through fields for status keywords
-          for (let i = 0; i < fields.length; i++) {
-            const field = fields[i].trim();
-
-            // Check for status
-            if (['InProgress', 'Completed', 'Failed', 'NotStarted', 'Succeeded'].some(s =>
-              field.toLowerCase().includes(s.toLowerCase()))) {
-              const statusMatch = field.match(/\b(InProgress|Completed|Failed|NotStarted|Succeeded)\b/i);
-              if (statusMatch) {
-                statusInfo.status = statusMatch[1];
-              }
-            }
-
-            // Check for timestamps
-            if (field.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)) {
-              if (!statusInfo.startTime) {
-                statusInfo.startTime = field;
-              } else if (field !== 'None' && field !== statusInfo.startTime) {
-                statusInfo.endTime = field;
-              }
-            }
-          }
-        }
-
-        break; // Found our data line, stop searching
+        break;
       }
     }
 
-    // Ensure that the end time isn't set if it's "None" or identical to start time
-    if (statusInfo.endTime && (statusInfo.endTime === 'None' || statusInfo.endTime === statusInfo.startTime)) {
+    if (statusInfo.endTime === 'None' || statusInfo.endTime === statusInfo.startTime) {
       statusInfo.endTime = null;
     }
 
     return statusInfo;
   },
 
-  parseJobRunOutput: (output) => {
-    // Parse the streaming output from fab job run command
-    const lines = output.split('\n');
-    const statusUpdates = [];
-    let jobId = null;
-
-    for (const line of lines) {
-      // Extract job ID
-      const jobIdMatch = line.match(/Job instance '([a-f0-9-]+)'/);
-      if (jobIdMatch) {
-        jobId = jobIdMatch[1];
-      }
-
-      // Extract status updates
-      const statusMatch = line.match(/Job instance status: (\w+)/);
-      if (statusMatch) {
-        statusUpdates.push(statusMatch[1]);
-      }
-    }
-
-    const finalStatus = output.includes('Completed') ? 'Completed' :
-      output.includes('Failed') ? 'Failed' :
-        statusUpdates[statusUpdates.length - 1] || 'Unknown';
-
-    return {
-      jobId,
-      statusUpdates,
-      finalStatus
-    };
-  },
-
   formatDateTime: (dateTimeStr) => {
     if (!dateTimeStr || dateTimeStr === 'None') return 'N/A';
     try {
       const date = new Date(dateTimeStr);
-      return date.toLocaleString();
-    } catch {
+      // Check if the date is valid
+      if (isNaN(date.getTime())) {
+        console.error('Invalid date:', dateTimeStr);
+        return dateTimeStr;
+      }
+      // Use 24-hour format in local timezone
+      return date.toLocaleString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+        timeZoneName: 'short'
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error, dateTimeStr);
       return dateTimeStr;
     }
   },
@@ -244,160 +260,167 @@ const utils = {
   }
 };
 
-// History management
-const loadHistory = async () => {
-  try {
-    const data = await fs.readFile(HISTORY_FILE, 'utf8');
-    return JSON.parse(data);
-  } catch {
-    return [];
+// ===== HISTORY MANAGEMENT =====
+const HistoryManager = {
+  load: async () => {
+    try {
+      const data = await fs.readFile(HISTORY_FILE, 'utf8');
+      return JSON.parse(data);
+    } catch {
+      return [];
+    }
+  },
+
+  save: async (history) => {
+    await fs.mkdir(CONFIG_DIR, { recursive: true });
+    await fs.writeFile(HISTORY_FILE, JSON.stringify(history.slice(0, LIMITS.HISTORY_SIZE), null, 2));
+  },
+
+  createEntry: (command, result) => ({
+    command,
+    timestamp: new Date().toISOString(),
+    success: result.success,
+    output: result.output?.substring(0, LIMITS.OUTPUT_PREVIEW)
+  }),
+
+  formatTimestamp: (isoString) => {
+    try {
+      const date = new Date(isoString);
+      return date.toLocaleTimeString(undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+    } catch {
+      return isoString;
+    }
   }
 };
 
-const saveHistory = async (history) => {
-  await fs.mkdir(CONFIG_DIR, { recursive: true });
-  await fs.writeFile(HISTORY_FILE, JSON.stringify(history.slice(0, 50), null, 2));
+// ===== NAVIGATION HELPER =====
+const handleNavigation = (key, currentIndex, maxIndex, setter) => {
+  if (key.upArrow && currentIndex > 0) {
+    setter(currentIndex - 1);
+  } else if (key.downArrow && currentIndex < maxIndex) {
+    setter(currentIndex + 1);
+  }
 };
 
-// Custom Hooks
+// ===== STATE MANAGEMENT =====
+const createInitialState = () => ({
+  currentView: VIEWS.MAIN,
+  selectedOption: 0,
+  output: '',
+  loading: false,
+  error: '',
+  workspaces: [],
+  selectedWorkspace: 0,
+  workspaceItems: [],
+  selectedWorkspaceItem: 0,
+  inInteractiveMode: false,
+  commandHistory: [],
+  loadingProgress: 0,
+  config: null,
+  activeJobs: [],
+  currentJob: null,
+  selectedJobOption: 0,
+  selectedNotebookAction: 0,
+  currentNotebook: null,
+  completedJobs: new Set(),
+  cache: new Map()
+});
+
 const useFabricState = () => {
-  const [currentView, setCurrentView] = useState(VIEWS.MAIN);
-  const [selectedOption, setSelectedOption] = useState(0);
-  const [output, setOutput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [workspaces, setWorkspaces] = useState([]);
-  const [selectedWorkspace, setSelectedWorkspace] = useState(0);
-  const [workspaceItems, setWorkspaceItems] = useState([]);
-  const [selectedWorkspaceItem, setSelectedWorkspaceItem] = useState(0);
-  const [inInteractiveMode, setInInteractiveMode] = useState(false);
-  const [commandHistory, setCommandHistory] = useState([]);
-  const [cache, setCache] = useState(new Map());
-  const [loadingProgress, setLoadingProgress] = useState(0);
-  const [config, setConfig] = useState(null);
-  const [activeJobs, setActiveJobs] = useState([]);
-  const [currentJob, setCurrentJob] = useState(null);
-  const [selectedJobOption, setSelectedJobOption] = useState(0);
-  const [selectedNotebookAction, setSelectedNotebookAction] = useState(0);
-  const [currentNotebook, setCurrentNotebook] = useState(null);
-  const [completedJobs, setCompletedJobs] = useState(new Set());
+  const [state, setState] = useState(createInitialState());
 
   useEffect(() => {
-    // Load configuration and history on mount
     const init = async () => {
-      const [loadedConfig, history] = await Promise.all([loadConfig(), loadHistory()]);
-      setConfig(loadedConfig);
-      setCommandHistory(history);
+      const [config, history] = await Promise.all([loadConfig(), HistoryManager.load()]);
+      setState(prev => ({ ...prev, config, commandHistory: history }));
     };
     init();
   }, []);
 
-  const resetState = useCallback(() => {
-    setOutput('');
-    setError('');
-    setWorkspaces([]);
-    setWorkspaceItems([]);
-    setSelectedOption(0);
-    setSelectedWorkspace(0);
-    setSelectedWorkspaceItem(0);
-    setSelectedNotebookAction(0);
-    setCurrentNotebook(null);
-    setCompletedJobs(new Set());
-    setLoadingProgress(0);
-  }, []);
+  const actions = useMemo(() => ({
+    updateState: (updates) => setState(prev => ({ ...prev, ...updates })),
 
-  const addToHistory = useCallback(async (command, result) => {
-    const entry = {
-      command,
-      timestamp: new Date().toISOString(),
-      success: result.success,
-      output: result.output?.substring(0, 200) // Store first 200 chars
-    };
+    resetState: () => setState(prev => ({
+      ...createInitialState(),
+      config: prev.config,
+      commandHistory: prev.commandHistory,
+      cache: prev.cache
+    })),
 
-    const newHistory = [entry, ...commandHistory.slice(0, 49)];
-    setCommandHistory(newHistory);
-    await saveHistory(newHistory);
-  }, [commandHistory]);
+    setCurrentView: (view) => setState(prev => ({ ...prev, currentView: view })),
+    setSelectedOption: (option) => setState(prev => ({ ...prev, selectedOption: option })),
+    setOutput: (output) => setState(prev => ({ ...prev, output })),
+    setLoading: (loading) => setState(prev => ({ ...prev, loading })),
+    setError: (error) => setState(prev => ({ ...prev, error })),
+    setWorkspaces: (workspaces) => setState(prev => ({ ...prev, workspaces })),
+    setSelectedWorkspace: (index) => setState(prev => ({ ...prev, selectedWorkspace: index })),
+    setWorkspaceItems: (items) => setState(prev => ({ ...prev, workspaceItems: items })),
+    setSelectedWorkspaceItem: (index) => setState(prev => ({ ...prev, selectedWorkspaceItem: index })),
+    setInInteractiveMode: (mode) => setState(prev => ({ ...prev, inInteractiveMode: mode })),
+    setLoadingProgress: (progress) => setState(prev => ({ ...prev, loadingProgress: progress })),
+    setConfig: (config) => setState(prev => ({ ...prev, config })),
+    setCurrentJob: (job) => setState(prev => ({ ...prev, currentJob: job })),
+    setSelectedJobOption: (option) => setState(prev => ({ ...prev, selectedJobOption: option })),
+    setSelectedNotebookAction: (action) => setState(prev => ({ ...prev, selectedNotebookAction: action })),
+    setCurrentNotebook: (notebook) => setState(prev => ({ ...prev, currentNotebook: notebook })),
 
-  const getCachedData = useCallback((key) => {
-    const cached = cache.get(key);
-    const timeout = config?.cacheTimeout || 300000;
-    if (cached && Date.now() - cached.timestamp < timeout) {
-      return cached.data;
-    }
-    return null;
-  }, [cache, config]);
-
-  const setCachedData = useCallback((key, data) => {
-    setCache(prev => new Map(prev).set(key, {
-      data,
-      timestamp: Date.now()
-    }));
-  }, []);
-
-  const addActiveJob = useCallback((jobId, workspace, notebook) => {
-    setActiveJobs(prev => [...prev, { jobId, workspace, notebook, startTime: Date.now() }]);
-  }, []);
-
-  const markJobCompleted = useCallback((workspace, notebook) => {
-    const jobKey = `${workspace}/${notebook}`;
-    setCompletedJobs(prev => new Set([...prev, jobKey]));
-  }, []);
-
-  return {
-    state: {
-      currentView,
-      selectedOption,
-      output,
-      loading,
-      error,
-      workspaces,
-      selectedWorkspace,
-      workspaceItems,
-      selectedWorkspaceItem,
-      inInteractiveMode,
-      commandHistory,
-      loadingProgress,
-      config,
-      activeJobs,
-      currentJob,
-      selectedJobOption,
-      selectedNotebookAction,
-      currentNotebook,
-      completedJobs
+    addToHistory: async (command, result) => {
+      const entry = HistoryManager.createEntry(command, result);
+      setState(prev => {
+        const newHistory = [entry, ...prev.commandHistory.slice(0, LIMITS.HISTORY_SIZE - 1)];
+        HistoryManager.save(newHistory);
+        return { ...prev, commandHistory: newHistory };
+      });
     },
-    actions: {
-      setCurrentView,
-      setSelectedOption,
-      setOutput,
-      setLoading,
-      setError,
-      setWorkspaces,
-      setSelectedWorkspace,
-      setWorkspaceItems,
-      setSelectedWorkspaceItem,
-      setInInteractiveMode,
-      setLoadingProgress,
-      resetState,
-      addToHistory,
-      getCachedData,
-      setCachedData,
-      setConfig,
-      addActiveJob,
-      setCurrentJob,
-      setSelectedJobOption,
-      setSelectedNotebookAction,
-      setCurrentNotebook,
-      markJobCompleted
-    }
-  };
+
+    getCachedData: (key) => {
+      const cached = state.cache.get(key);
+      const timeout = state.config?.cacheTimeout || LIMITS.CACHE_TIMEOUT;
+      if (cached && Date.now() - cached.timestamp < timeout) {
+        return cached.data;
+      }
+      return null;
+    },
+
+    setCachedData: (key, data) => {
+      setState(prev => {
+        const newCache = new Map(prev.cache);
+        newCache.set(key, { data, timestamp: Date.now() });
+        return { ...prev, cache: newCache };
+      });
+    },
+
+    addActiveJob: (jobId, workspace, notebook) => {
+      setState(prev => ({
+        ...prev,
+        activeJobs: [...prev.activeJobs, { jobId, workspace, notebook, startTime: Date.now() }]
+      }));
+    },
+
+    markJobCompleted: (workspace, notebook) => {
+      const jobKey = `${workspace}/${notebook}`;
+      setState(prev => ({
+        ...prev,
+        completedJobs: new Set([...prev.completedJobs, jobKey])
+      }));
+    },
+
+    setCommandHistory: (history) => setState(prev => ({ ...prev, commandHistory: history }))
+  }), [state.cache, state.config]);
+
+  return { state, actions };
 };
 
+// ===== COMMAND EXECUTION =====
 const useCommandExecution = (actions, config) => {
   const executeCommand = useCallback(async (command, options = {}) => {
     const cacheKey = `${command}-${JSON.stringify(options)}`;
 
-    // Check cache first
     if (!options.skipCache) {
       const cachedResult = actions.getCachedData(cacheKey);
       if (cachedResult) {
@@ -414,14 +437,13 @@ const useCommandExecution = (actions, config) => {
     actions.setLoading(true);
     actions.setError('');
 
-    // Simulate progress for user feedback
     const progressInterval = setInterval(() => {
-      actions.setLoadingProgress(prev => Math.min(prev + 10, 90));
-    }, 200);
+      actions.setLoadingProgress(prev => Math.min(prev + LIMITS.PROGRESS_INCREMENT, LIMITS.PROGRESS_MAX));
+    }, TIMEOUTS.PROGRESS_UPDATE);
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), options.timeout || 30000);
+      const timeoutId = setTimeout(() => controller.abort(), options.timeout || TIMEOUTS.DEFAULT);
 
       const { stdout, stderr } = await execAsync(command, {
         env: { ...process.env, FORCE_COLOR: '0', ...options.env },
@@ -432,25 +454,24 @@ const useCommandExecution = (actions, config) => {
 
       const result = {
         success: !stderr?.trim(),
-        output: utils.cleanOutput(stdout),
+        output: ParsingUtils.cleanOutput(stdout),
         error: stderr?.trim(),
         command
       };
 
-      // Cache successful results
       if (result.success && !options.skipCache) {
         actions.setCachedData(cacheKey, result);
       }
 
-      if (result.success && !options.silent) {
-        actions.setOutput(result.output);
-      } else if (!result.success && !options.silent) {
-        actions.setError(result.error);
+      if (!options.silent) {
+        if (result.success) {
+          actions.setOutput(result.output);
+        } else {
+          actions.setError(result.error);
+        }
       }
 
       actions.setLoadingProgress(100);
-
-      // Save to history
       await actions.addToHistory(command, result);
 
       return result;
@@ -464,42 +485,38 @@ const useCommandExecution = (actions, config) => {
         actions.setError(error);
       }
       actions.setLoadingProgress(100);
-
       await actions.addToHistory(command, result);
 
       return result;
     } finally {
       clearInterval(progressInterval);
       actions.setLoading(false);
-      setTimeout(() => actions.setLoadingProgress(0), 1000);
+      setTimeout(() => actions.setLoadingProgress(0), TIMEOUTS.RETRY_DELAY);
     }
   }, [actions]);
 
   const executeCommandWithRetry = useCallback(async (command, options = {}, maxRetries = null) => {
-    const retries = maxRetries ?? config?.maxRetries ?? 2;
+    const retries = maxRetries ?? config?.maxRetries ?? LIMITS.MAX_RETRIES;
     let lastError;
 
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         const result = await executeCommand(command, {
           ...options,
-          skipCache: attempt > 0 // Skip cache on retries
+          skipCache: attempt > 0
         });
 
-        if (result.success) {
-          return result;
-        }
-
+        if (result.success) return result;
         lastError = result.error;
 
         if (attempt < retries) {
           actions.setError(`Attempt ${attempt + 1} failed. Retrying...`);
-          await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+          await new Promise(resolve => setTimeout(resolve, TIMEOUTS.RETRY_DELAY * (attempt + 1)));
         }
       } catch (err) {
         lastError = err.message;
         if (attempt < retries) {
-          await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+          await new Promise(resolve => setTimeout(resolve, TIMEOUTS.RETRY_DELAY * (attempt + 1)));
         }
       }
     }
@@ -523,19 +540,17 @@ const useCommandExecution = (actions, config) => {
       let error = '';
       let statusCount = 0;
 
-      // Update status periodically to show it's working
       const statusInterval = setInterval(() => {
         statusCount++;
         const dots = '.'.repeat((statusCount % 3) + 1);
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
         actions.setOutput(`🔄 Job is running${dots} (${elapsed}s elapsed)`);
-      }, 1000); // Update every 1 second
+      }, 1000);
 
       child.stdout.on('data', (data) => {
         const chunk = data.toString();
         output += chunk;
 
-        // Only show important status updates
         const lines = chunk.split('\n');
         for (const line of lines) {
           if (line.includes('Completed') || line.includes('Failed')) {
@@ -549,26 +564,22 @@ const useCommandExecution = (actions, config) => {
       });
 
       child.stderr.on('data', (data) => {
-        const chunk = data.toString();
-        error += chunk;
+        error += data.toString();
       });
 
       child.on('close', async (code) => {
         clearInterval(statusInterval);
         actions.setLoading(false);
 
-        const endTime = Date.now();
-        const duration = Math.floor((endTime - startTime) / 1000);
-
+        const duration = Math.floor((Date.now() - startTime) / 1000);
         const result = {
           success: code === 0 && !error.trim(),
-          output: utils.cleanOutput(output),
+          output: ParsingUtils.cleanOutput(output),
           error: error.trim(),
           command,
           duration
         };
 
-        // Save to history
         await actions.addToHistory(command, result);
 
         if (code === 0) {
@@ -585,7 +596,6 @@ const useCommandExecution = (actions, config) => {
         reject(err);
       });
 
-      // Handle timeout
       if (options.timeout) {
         setTimeout(() => {
           clearInterval(statusInterval);
@@ -601,182 +611,131 @@ const useCommandExecution = (actions, config) => {
   return { executeCommand, executeCommandWithRetry, executeCommandWithStatusUpdates };
 };
 
-const useInputHandlers = (state, actions, handlers) => {
-  const inputHandlers = useMemo(() => ({
-    [VIEWS.MAIN]: (input, key) => {
-      if (key.upArrow && state.selectedOption > 0) {
-        actions.setSelectedOption(state.selectedOption - 1);
-      } else if (key.downArrow && state.selectedOption < MENU_OPTIONS.length - 1) {
-        actions.setSelectedOption(state.selectedOption + 1);
-      } else if (key.return) {
-        handlers.handleMenuSelection();
-      } else if (input === 'q' || key.escape) {
-        process.exit(0);
-      }
-    },
+// ===== INPUT HANDLERS =====
+const createInputHandlers = (state, actions, handlers) => ({
+  [VIEWS.MAIN]: (input, key) => {
+    handleNavigation(key, state.selectedOption, 3, actions.setSelectedOption);
 
-    [VIEWS.WORKSPACES]: (input, key) => {
-      const maxSelection = state.workspaces.length; // +1 for return option
-      if (key.upArrow && state.selectedWorkspace > 0) {
-        actions.setSelectedWorkspace(state.selectedWorkspace - 1);
-      } else if (key.downArrow && state.selectedWorkspace < maxSelection) {
-        actions.setSelectedWorkspace(state.selectedWorkspace + 1);
-      } else if (key.return) {
-        if (state.selectedWorkspace === state.workspaces.length) {
-          // Return option selected
-          actions.setCurrentView(VIEWS.MAIN);
-          actions.resetState();
-        } else {
-          // Workspace selected
-          handlers.handleWorkspaceSelection();
-        }
-      } else if (key.escape || input === 'q') {
+    if (key.return) handlers.handleMenuSelection();
+    else if (input === 'q' || key.escape) process.exit(0);
+  },
+
+  [VIEWS.WORKSPACES]: (input, key) => {
+    const maxSelection = state.workspaces.length;
+    handleNavigation(key, state.selectedWorkspace, maxSelection, actions.setSelectedWorkspace);
+
+    if (key.return) {
+      if (state.selectedWorkspace === state.workspaces.length) {
         actions.setCurrentView(VIEWS.MAIN);
         actions.resetState();
-      } else if (input === 'r') {
-        // Refresh shortcut
-        handlers.refreshWorkspaces();
+      } else {
+        handlers.handleWorkspaceSelection();
       }
-    },
+    } else if (key.escape || input === 'q') {
+      actions.setCurrentView(VIEWS.MAIN);
+      actions.resetState();
+    } else if (input === 'r') {
+      handlers.refreshWorkspaces();
+    }
+  },
 
-    [VIEWS.WORKSPACE_ITEMS]: (input, key) => {
-      if (key.escape || input === 'q') {
-        actions.setCurrentView(VIEWS.WORKSPACES);
-        actions.setWorkspaceItems([]);
-        actions.setSelectedWorkspaceItem(0);
-        return;
+  [VIEWS.WORKSPACE_ITEMS]: (input, key) => {
+    if (key.escape || input === 'q') {
+      actions.updateState({
+        currentView: VIEWS.WORKSPACES,
+        workspaceItems: [],
+        selectedWorkspaceItem: 0
+      });
+      return;
+    }
+
+    const maxSelection = state.workspaceItems.length;
+    handleNavigation(key, state.selectedWorkspaceItem, maxSelection, actions.setSelectedWorkspaceItem);
+
+    if (key.return) {
+      if (state.selectedWorkspaceItem === state.workspaceItems.length) {
+        actions.updateState({
+          currentView: VIEWS.WORKSPACES,
+          workspaceItems: [],
+          selectedWorkspaceItem: 0
+        });
+      } else {
+        handlers.handleWorkspaceItemSelection();
       }
+    }
+  },
 
-      const maxSelection = state.workspaceItems.length; // +1 for return option
-      if (key.upArrow && state.selectedWorkspaceItem > 0) {
-        actions.setSelectedWorkspaceItem(state.selectedWorkspaceItem - 1);
-      } else if (key.downArrow && state.selectedWorkspaceItem < maxSelection) {
-        actions.setSelectedWorkspaceItem(state.selectedWorkspaceItem + 1);
-      } else if (key.return) {
-        if (state.selectedWorkspaceItem === state.workspaceItems.length) {
-          // Return option selected
-          actions.setCurrentView(VIEWS.WORKSPACES);
-          actions.setWorkspaceItems([]);
-          actions.setSelectedWorkspaceItem(0);
-        } else {
-          // Item selected
-          handlers.handleWorkspaceItemSelection();
-        }
-      }
-    },
+  [VIEWS.NOTEBOOK_ACTIONS]: (input, key) => {
+    handleNavigation(key, state.selectedNotebookAction, 3, actions.setSelectedNotebookAction);
 
-    [VIEWS.NOTEBOOK_ACTIONS]: (input, key) => {
-      if (key.upArrow && state.selectedNotebookAction > 0) {
-        actions.setSelectedNotebookAction(state.selectedNotebookAction - 1);
-      } else if (key.downArrow && state.selectedNotebookAction < 3) {
-        actions.setSelectedNotebookAction(state.selectedNotebookAction + 1);
-      } else if (key.return) {
-        handlers.handleNotebookActionSelection();
-      } else if (key.escape || input === 'q') {
-        actions.setCurrentView(VIEWS.WORKSPACE_ITEMS);
-        actions.setSelectedNotebookAction(0);
-        actions.setCurrentNotebook(null);
-      }
-    },
+    if (key.return) handlers.handleNotebookActionSelection();
+    else if (key.escape || input === 'q') {
+      actions.updateState({
+        currentView: VIEWS.WORKSPACE_ITEMS,
+        selectedNotebookAction: 0,
+        currentNotebook: null
+      });
+    }
+  },
 
-    [VIEWS.JOB_MENU]: (input, key) => {
-      if (key.upArrow && state.selectedJobOption > 0) {
-        actions.setSelectedJobOption(state.selectedJobOption - 1);
-      } else if (key.downArrow && state.selectedJobOption < 2) {
-        actions.setSelectedJobOption(state.selectedJobOption + 1);
-      } else if (key.return) {
-        handlers.handleJobMenuSelection();
-      }
-    },
+  [VIEWS.JOB_MENU]: (input, key) => {
+    handleNavigation(key, state.selectedJobOption, 2, actions.setSelectedJobOption);
 
-    [VIEWS.COMMAND_HISTORY]: (input, key) => {
-      if (key.escape || input === 'q') {
-        actions.setCurrentView(VIEWS.MAIN);
-      } else if (input === 'c') {
-        // Clear history
-        actions.setCommandHistory([]);
-        saveHistory([]);
-      }
-    },
+    if (key.return) handlers.handleJobMenuSelection();
+    else if (key.escape || input === 'q') {
+      actions.updateState({
+        currentView: VIEWS.WORKSPACE_ITEMS,
+        currentJob: null,
+        selectedJobOption: 0
+      });
+    }
+  },
 
-    [VIEWS.JOB_MENU]: (input, key) => {
-      if (key.upArrow && state.selectedJobOption > 0) {
-        actions.setSelectedJobOption(state.selectedJobOption - 1);
-      } else if (key.downArrow && state.selectedJobOption < 2) {
-        actions.setSelectedJobOption(state.selectedJobOption + 1);
-      } else if (key.return) {
-        handlers.handleJobMenuSelection();
-      } else if (key.escape || input === 'q') {
-        actions.setCurrentView(VIEWS.WORKSPACE_ITEMS);
-        actions.setCurrentJob(null);
-        actions.setSelectedJobOption(0);
-      }
-    },
+  [VIEWS.JOB_STATUS]: (input, key) => {
+    if (key.return || key.escape || input === 'q') {
+      actions.setCurrentView(VIEWS.JOB_MENU);
+    } else if (input === 'r') {
+      handlers.checkJobStatus();
+    }
+  },
 
-    [VIEWS.JOB_STATUS]: (input, key) => {
-      if (key.return || key.escape || input === 'q') {
-        actions.setCurrentView(VIEWS.JOB_MENU);
-      } else if (input === 'r') {
-        // Refresh status
-        handlers.checkJobStatus();
-      }
-    },
+  [VIEWS.COMMAND_HISTORY]: (input, key) => {
+    if (key.escape || input === 'q') {
+      actions.setCurrentView(VIEWS.MAIN);
+    } else if (input === 'c') {
+      actions.setCommandHistory([]);
+      HistoryManager.save([]);
+    }
+  },
 
-    [VIEWS.OUTPUT]: (input, key) => {
-      if (key.escape || input === 'q') {
-        // If we have a current notebook, go back to notebook actions
-        if (state.currentNotebook) {
-          actions.setCurrentView(VIEWS.NOTEBOOK_ACTIONS);
-        } else {
-          actions.setCurrentView(VIEWS.MAIN);
-          actions.resetState();
-        }
-      }
-    },
-
-    default: (input, key) => {
-      if (key.escape || input === 'q') {
+  [VIEWS.OUTPUT]: (input, key) => {
+    if (key.escape || input === 'q') {
+      if (state.currentNotebook) {
+        actions.setCurrentView(VIEWS.NOTEBOOK_ACTIONS);
+      } else {
         actions.setCurrentView(VIEWS.MAIN);
         actions.resetState();
       }
     }
-  }), [state, actions, handlers]);
+  },
 
-  return inputHandlers[state.currentView] || inputHandlers.default;
-};
+  default: (input, key) => {
+    if (key.escape || input === 'q') {
+      actions.setCurrentView(VIEWS.MAIN);
+      actions.resetState();
+    }
+  }
+});
 
-// Animated Weave Title Component
+// ===== UI COMPONENTS =====
 const AnimatedWeaveTitle = React.memo(() => {
   const [frame, setFrame] = useState(0);
-  const [direction, setDirection] = useState(1); // 1 for forward, -1 for backward
-  
+  const [direction, setDirection] = useState(1);
+
   useEffect(() => {
-    const interval = setInterval(() => {
-      setFrame(prev => {
-        const nextFrame = prev + direction;
-        
-        // If we've reached the end, reverse direction
-        if (nextFrame >= 8) {
-          setDirection(-1);
-          return 8;
-        }
-        // If we've reached the beginning, go forward again
-        if (nextFrame <= 0) {
-          setDirection(1);
-          return 0;
-        }
-        
-        return nextFrame;
-      });
-    }, 500);
-    
-    return () => clearInterval(interval);
-  }, [direction]);
-  
-  const getWeavePattern = (frame) => {
     const patterns = [
       'w   e   a   v   e',
-      'w ─ e   a   v   e', 
+      'w ─ e   a   v   e',
       'w ─ e ─ a   v   e',
       'w ─ e ─ a ─ v   e',
       'w ─ e ─ a ─ v ─ e',
@@ -785,191 +744,185 @@ const AnimatedWeaveTitle = React.memo(() => {
       'w │ e │ a │ v ─ e',
       'w │ e │ a │ v │ e'
     ];
-    return patterns[frame] || 'w   e   a   v   e';
-  };
-  
-  return React.createElement(Text, { 
-    bold: true, 
-    color: COLORS.PRIMARY,
-    fontSize: 24
-  }, getWeavePattern(frame));
+
+    const interval = setInterval(() => {
+      setFrame(prev => {
+        const nextFrame = prev + direction;
+
+        if (nextFrame >= patterns.length - 1) {
+          setDirection(-1);
+          return patterns.length - 1;
+        }
+        if (nextFrame <= 0) {
+          setDirection(1);
+          return 0;
+        }
+
+        return nextFrame;
+      });
+    }, TIMEOUTS.ANIMATION);
+
+    return () => clearInterval(interval);
+  }, [direction]);
+
+  const patterns = [
+    'w   e   a   v   e',
+    'w ─ e   a   v   e',
+    'w ─ e ─ a   v   e',
+    'w ─ e ─ a ─ v   e',
+    'w ─ e ─ a ─ v ─ e',
+    'w │ e ─ a ─ v ─ e',
+    'w │ e │ a ─ v ─ e',
+    'w │ e │ a │ v ─ e',
+    'w │ e │ a │ v │ e'
+  ];
+
+  return createText({ bold: true, color: COLORS.PRIMARY, fontSize: 24 }, patterns[frame]);
 });
 
-// UI Components
-const MainMenu = React.memo(({ selectedOption }) => (
-  React.createElement(Box, { flexDirection: 'column', padding: 1 }, [
-    React.createElement(AnimatedWeaveTitle, { key: 'title' }),
-    React.createElement(Box, { key: 'spacer', height: 1 }),
-    ...MENU_OPTIONS.map((option, index) =>
-      React.createElement(Text, {
-        key: index,
-        color: index === selectedOption ? 'black' : 'white',
-        backgroundColor: index === selectedOption ? COLORS.HIGHLIGHT_BG : undefined
-      },
-        `${option.label}`
-      )
+const MainMenu = React.memo(({ selectedOption }) => {
+  const menuOptions = useMemo(() => [
+    { label: 'Workspaces', command: CommandBuilder.listWorkspaces(), view: VIEWS.WORKSPACES },
+    { label: 'Manual Interactive Shell', action: 'interactive' },
+    { label: 'Command History', action: 'history', view: VIEWS.COMMAND_HISTORY },
+    { label: 'Exit', action: 'exit' }
+  ], []);
+
+  return createBox({ flexDirection: 'column', padding: 1 }, [
+    h(AnimatedWeaveTitle, { key: 'title' }),
+    spacer(),
+    ...menuOptions.map((option, index) =>
+      createMenuItem(option.label, index, selectedOption)
     )
-  ])
-));
+  ]);
+});
+
+const LoadingOrError = ({ loading, error, loadingMessage = 'Loading...' }) => {
+  if (loading) return createLoadingDisplay(loadingMessage);
+  if (error) return createBox({ flexDirection: 'column' }, createErrorDisplay(error));
+  return null;
+};
 
 const WorkspacesList = React.memo(({ workspaces, selectedWorkspace, loading, error, loadingProgress }) => {
-  const outputElements = [
-    React.createElement(Text, { key: 'title', bold: true, color: COLORS.PRIMARY },
-      'Workspaces'
-    ),
-    React.createElement(Box, { key: 'spacer', height: 1 })
+  const elements = [
+    createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, 'Workspaces'),
+    spacer()
   ];
 
   if (loading) {
-    outputElements.push(
-      React.createElement(Text, { key: 'loading', color: COLORS.WARNING }, '⏳ Loading workspaces...')
-    );
+    elements.push(createLoadingDisplay('Loading workspaces...', 'workspaces'));
   } else if (error) {
-    outputElements.push(
-      React.createElement(Text, { key: 'error-title', color: COLORS.ERROR, bold: true }, '❌ Error:'),
-      React.createElement(Text, { key: 'error-text', color: COLORS.ERROR }, error),
-      React.createElement(Text, { key: 'retry-tip', color: COLORS.SECONDARY, italic: true },
+    elements.push(...createErrorDisplay(error, 'workspaces'));
+    elements.push(
+      createText({ key: 'retry-tip', color: COLORS.SECONDARY, italic: true },
         'Press Enter to retry or check your network connection'
       )
     );
   } else if (workspaces.length > 0) {
-    outputElements.push(
-      React.createElement(Text, { key: 'workspace-title', color: COLORS.SUCCESS, bold: true },
+    elements.push(
+      createText({ key: 'workspace-title', color: COLORS.SUCCESS, bold: true },
         `Found ${workspaces.length} workspace${workspaces.length === 1 ? '' : 's'}:`
       ),
-      React.createElement(Box, { key: 'spacer2', height: 1 }),
+      spacer('spacer2'),
       ...workspaces.map((workspace, index) =>
-        React.createElement(Text, {
-          key: `workspace-${index}`,
-          color: index === selectedWorkspace ? 'black' : 'white',
-          backgroundColor: index === selectedWorkspace ? COLORS.SUCCESS_BG : undefined
-        },
-          `${workspace}`
-        )
+        createMenuItem(workspace, index, selectedWorkspace, COLORS.SUCCESS_BG)
       ),
-      React.createElement(Box, { key: 'separator', height: 1 }),
-      React.createElement(Text, {
-        key: 'return-option',
-        color: workspaces.length === selectedWorkspace ? 'black' : 'white',
-        backgroundColor: workspaces.length === selectedWorkspace ? COLORS.SECONDARY : undefined
-      },
-        'Return to Main Menu'
-      )
+      spacer('separator'),
+      createMenuItem('Return to Main Menu', workspaces.length, selectedWorkspace, COLORS.SECONDARY)
     );
   } else if (!loading) {
-    outputElements.push(
-      React.createElement(Text, { key: 'no-workspaces', color: COLORS.WARNING }, '⚠️  No workspaces found'),
-      React.createElement(Text, { key: 'refresh-tip', color: COLORS.SECONDARY, italic: true },
+    elements.push(
+      createText({ key: 'no-workspaces', color: COLORS.WARNING }, '⚠️  No workspaces found'),
+      createText({ key: 'refresh-tip', color: COLORS.SECONDARY, italic: true },
         'Press Enter to retry or check your fabric CLI setup'
       )
     );
   }
 
-
-  return React.createElement(Box, { flexDirection: 'column', padding: 1 }, outputElements);
+  return createBox({ flexDirection: 'column', padding: 1 }, elements);
 });
 
 const WorkspaceItems = React.memo(({ items, selectedItem, workspaceName, loading, error }) => {
-  const outputElements = [
-    React.createElement(Text, { key: 'title', bold: true, color: COLORS.PRIMARY },
-      'Workspace Items'
-    ),
-    React.createElement(Box, { key: 'spacer', height: 1 })
+  const elements = [
+    createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, 'Workspace Items'),
+    spacer()
   ];
 
   if (loading) {
-    outputElements.push(
-      React.createElement(Text, { key: 'loading', color: COLORS.WARNING }, '⏳ Loading workspace items...')
-    );
+    elements.push(createLoadingDisplay('Loading workspace items...', 'items'));
   } else if (error) {
-    outputElements.push(
-      React.createElement(Text, { key: 'error-title', color: COLORS.ERROR, bold: true }, '❌ Error:'),
-      React.createElement(Text, { key: 'error-text', color: COLORS.ERROR }, error),
-      React.createElement(Box, { key: 'error-spacer', height: 1 }),
-      React.createElement(Text, { key: 'return-instruction', color: COLORS.SECONDARY, italic: true },
+    elements.push(...createErrorDisplay(error, 'items'));
+    elements.push(
+      spacer('error-spacer'),
+      createText({ key: 'return-instruction', color: COLORS.SECONDARY, italic: true },
         "Press 'q' or ESC to return to workspaces"
       )
     );
   } else if (items.length > 0) {
-    // Group items by type
-    const notebooks = items.filter(item => utils.isNotebook(item));
-    const others = items.filter(item => !utils.isNotebook(item));
+    const notebooks = items.filter(item => ParsingUtils.isNotebook(item));
+    const others = items.filter(item => !ParsingUtils.isNotebook(item));
 
-    outputElements.push(
-      React.createElement(Text, { key: 'items-summary', color: COLORS.SECONDARY },
+    elements.push(
+      createText({ key: 'items-summary', color: COLORS.SECONDARY },
         `${notebooks.length} notebook${notebooks.length === 1 ? '' : 's'}, ${others.length} other item${others.length === 1 ? '' : 's'}`
       ),
-      React.createElement(Box, { key: 'spacer2', height: 1 })
+      spacer('spacer2')
     );
 
     items.forEach((item, index) => {
-      const isSelected = index === selectedItem;
-      const itemObj = typeof item === 'string' ? { name: item, isNotebook: utils.isNotebook(item) } : item;
-
-      outputElements.push(
-        React.createElement(Text, {
-          key: `item-${index}`,
-          color: isSelected ? 'black' : 'white',
-          backgroundColor: isSelected ? COLORS.WARNING_BG : undefined
-        },
-          `${itemObj.name}${itemObj.isNotebook ? ' 📓' : ''}`
+      const itemObj = typeof item === 'string' ? { name: item, isNotebook: ParsingUtils.isNotebook(item) } : item;
+      elements.push(
+        createMenuItem(
+          `${itemObj.name}${itemObj.isNotebook ? ' 📓' : ''}`,
+          index,
+          selectedItem,
+          COLORS.WARNING_BG
         )
       );
     });
-    
-    // Add return option
-    outputElements.push(
-      React.createElement(Box, { key: 'separator', height: 1 }),
-      React.createElement(Text, {
-        key: 'return-option',
-        color: items.length === selectedItem ? 'black' : 'white',
-        backgroundColor: items.length === selectedItem ? COLORS.SECONDARY : undefined
-      },
-        'Return to Workspaces'
-      )
+
+    elements.push(
+      spacer('separator'),
+      createMenuItem('Return to Workspaces', items.length, selectedItem, COLORS.SECONDARY)
     );
   } else if (!loading) {
-    outputElements.push(
-      React.createElement(Text, { key: 'no-items', color: COLORS.WARNING }, '⚠️  No items found in workspace'),
-      React.createElement(Box, { key: 'empty-spacer', height: 1 }),
-      React.createElement(Text, { key: 'empty-instruction', color: COLORS.SECONDARY, italic: true },
+    elements.push(
+      createText({ key: 'no-items', color: COLORS.WARNING }, '⚠️  No items found in workspace'),
+      spacer('empty-spacer'),
+      createText({ key: 'empty-instruction', color: COLORS.SECONDARY, italic: true },
         "This workspace is empty. Press 'q' to return to workspaces"
       )
     );
   }
 
-
-  return React.createElement(Box, { flexDirection: 'column', padding: 1 }, outputElements);
+  return createBox({ flexDirection: 'column', padding: 1 }, elements);
 });
 
 const CommandHistory = React.memo(({ history }) => {
-  const outputElements = [
-    React.createElement(Text, { key: 'title', bold: true, color: COLORS.PRIMARY },
-      '📜 Command History'
-    ),
-    React.createElement(Text, { key: 'instructions', color: COLORS.SECONDARY },
+  const elements = [
+    createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, '📜 Command History'),
+    createText({ key: 'instructions', color: COLORS.SECONDARY },
       "Press 'c' to clear history, 'q' to return to main menu"
     ),
-    React.createElement(Box, { key: 'spacer', height: 1 })
+    spacer()
   ];
 
   if (history.length === 0) {
-    outputElements.push(
-      React.createElement(Text, { key: 'no-history', color: COLORS.WARNING }, 'No command history yet')
+    elements.push(
+      createText({ key: 'no-history', color: COLORS.WARNING }, 'No command history yet')
     );
   } else {
-    history.slice(0, 10).forEach((entry, index) => {
-      const date = new Date(entry.timestamp);
-      const timeStr = date.toLocaleTimeString();
+    history.slice(0, LIMITS.HISTORY_DISPLAY).forEach((entry, index) => {
+      const timeStr = HistoryManager.formatTimestamp(entry.timestamp);
 
-      outputElements.push(
-        React.createElement(Box, { key: `entry-${index}`, flexDirection: 'column', marginBottom: 1 }, [
-          React.createElement(Text, { key: 'time', color: COLORS.SECONDARY }, `[${timeStr}]`),
-          React.createElement(Text, {
+      elements.push(
+        createBox({ key: `entry-${index}`, flexDirection: 'column', marginBottom: 1 }, [
+          createText({ key: 'time', color: COLORS.SECONDARY }, `[${timeStr}]`),
+          createText({
             key: 'cmd',
             color: entry.success ? COLORS.SUCCESS : COLORS.ERROR
           }, `$ ${entry.command}`),
-          entry.output && React.createElement(Text, {
+          entry.output && createText({
             key: 'output',
             color: COLORS.SECONDARY,
             dimColor: true
@@ -978,233 +931,148 @@ const CommandHistory = React.memo(({ history }) => {
       );
     });
 
-    if (history.length > 10) {
-      outputElements.push(
-        React.createElement(Text, { key: 'more', color: COLORS.SECONDARY, italic: true },
-          `... and ${history.length - 10} more entries`
+    if (history.length > LIMITS.HISTORY_DISPLAY) {
+      elements.push(
+        createText({ key: 'more', color: COLORS.SECONDARY, italic: true },
+          `... and ${history.length - LIMITS.HISTORY_DISPLAY} more entries`
         )
       );
     }
   }
 
-  return React.createElement(Box, { flexDirection: 'column', padding: 1 }, outputElements);
+  return createBox({ flexDirection: 'column', padding: 1 }, elements);
 });
 
 const NotebookActionsMenu = React.memo(({ notebook, workspace, selectedOption, completedJobs, activeJobs, currentJob }) => {
   const jobKey = `${workspace}/${notebook}`;
   const hasJobCompleted = completedJobs && completedJobs.has(jobKey);
-  
-  // Check if there's an active job for this notebook
-  const hasActiveJob = activeJobs && activeJobs.some(job => 
-    job.workspace === workspace && job.notebook === notebook
-  );
-  
-  // Check if current job is for this notebook
-  const isCurrentJobForThis = currentJob && 
-    currentJob.workspace === workspace && currentJob.notebook === notebook;
 
-  const outputElements = [
-    React.createElement(Text, { key: 'title', bold: true, color: COLORS.PRIMARY },
-      `${notebook} (Notebook)`
-    ),
-    React.createElement(Box, { key: 'spacer1', height: 1 }),
-    React.createElement(Text, { key: 'notebook-info', color: COLORS.PRIMARY },
-      `📓 Notebook: ${notebook}`
-    ),
-    React.createElement(Text, { key: 'workspace-info', color: COLORS.PRIMARY },
-      `📁 Workspace: ${workspace}`
-    ),
-    hasJobCompleted && React.createElement(Text, { key: 'job-status', color: COLORS.SUCCESS },
-      `✅ Job has been run and completed`
-    ),
-    React.createElement(Box, { key: 'spacer2', height: 1 }),
-    React.createElement(Text, { key: 'menu-title', color: COLORS.PRIMARY, bold: true },
-      'What would you like to do?'
-    ),
-    React.createElement(Box, { key: 'spacer3', height: 1 })
+  const elements = [
+    createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, 'Notebook Actions'),
+    spacer('spacer1'),
+    createText({ key: 'notebook-info', color: COLORS.PRIMARY }, `📓 ${notebook}`),
+    hasJobCompleted && createText({ key: 'job-status', color: COLORS.SUCCESS }, `✅ Job has been run and completed`),
+    spacer('spacer2'),
+    createText({ key: 'menu-title', color: COLORS.PRIMARY, bold: true }, 'What would you like to do?'),
+    spacer('spacer3')
   ];
 
   const options = [
-    { label: 'Run (Start job in background)', action: 'run' },
-    { label: 'Run Job Synchronously (Wait for completion)', action: 'run-sync' },
-    { label: 'View Last Job Details', action: 'view-last-job' }
+    'Run (Start job in background)',
+    'Run Job Synchronously (Wait for completion)',
+    'View Last Job Details'
   ];
 
   options.forEach((option, index) => {
-    outputElements.push(
-      React.createElement(Text, {
-        key: `option-${index}`,
-        color: index === selectedOption ? 'black' : 'white',
-        backgroundColor: index === selectedOption ? COLORS.WARNING_BG : undefined
-      },
-        `${option.label}`
-      )
-    );
+    elements.push(createMenuItem(option, index, selectedOption, COLORS.WARNING_BG));
   });
 
-  // Add return option with same design pattern as other views
-  outputElements.push(
-    React.createElement(Box, { key: 'separator', height: 1 }),
-    React.createElement(Text, {
-      key: 'return-option',
-      color: options.length === selectedOption ? 'black' : 'white',
-      backgroundColor: options.length === selectedOption ? COLORS.SECONDARY : undefined
-    },
-      'Return to Workspace Items'
-    )
+  elements.push(
+    spacer('separator'),
+    createMenuItem('Return to Workspace Items', options.length, selectedOption, COLORS.SECONDARY)
   );
 
-
-  return React.createElement(Box, { flexDirection: 'column', padding: 1 }, outputElements);
+  return createBox({ flexDirection: 'column', padding: 1 }, elements.filter(Boolean));
 });
 
 const JobMenu = React.memo(({ job, selectedOption }) => {
-  const outputElements = [
-    React.createElement(Text, { key: 'title', bold: true, color: COLORS.SUCCESS },
-      '✅ Job Started Successfully!'
-    ),
-    React.createElement(Box, { key: 'spacer1', height: 1 }),
-    React.createElement(Text, { key: 'job-info', color: COLORS.PRIMARY },
-      `📓 Notebook: ${job.notebook}`
-    ),
-    React.createElement(Text, { key: 'workspace-info', color: COLORS.PRIMARY },
-      `📁 Workspace: ${job.workspace}`
-    ),
-    React.createElement(Text, { key: 'job-id', color: COLORS.SECONDARY },
-      `🔖 Job ID: ${job.jobId}`
-    ),
-    React.createElement(Box, { key: 'spacer2', height: 1 }),
-    React.createElement(Text, { key: 'menu-title', color: COLORS.PRIMARY, bold: true },
-      'What would you like to do?'
-    ),
-    React.createElement(Box, { key: 'spacer3', height: 1 })
+  const elements = [
+    createText({ key: 'title', bold: true, color: COLORS.SUCCESS }, '✅ Job Started Successfully!'),
+    spacer('spacer1'),
+    createText({ key: 'job-info', color: COLORS.PRIMARY }, `📓 Notebook: ${job.notebook}`),
+    createText({ key: 'workspace-info', color: COLORS.PRIMARY }, `📁 Workspace: ${job.workspace}`),
+    createText({ key: 'job-id', color: COLORS.SECONDARY }, `🔖 Job ID: ${job.jobId}`),
+    spacer('spacer2'),
+    createText({ key: 'menu-title', color: COLORS.PRIMARY, bold: true }, 'What would you like to do?'),
+    spacer('spacer3')
   ];
 
   const options = [
-    { label: 'Check Job Status', action: 'status' },
-    { label: 'Run Job Synchronously (Wait for completion)', action: 'run-sync' },
-    { label: 'Return to Workspace Items', action: 'return' }
+    'Check Job Status',
+    'Run Job Synchronously (Wait for completion)',
+    'Return to Workspace Items'
   ];
 
   options.forEach((option, index) => {
-    outputElements.push(
-      React.createElement(Text, {
-        key: `option-${index}`,
-        color: index === selectedOption ? 'black' : 'white',
-        backgroundColor: index === selectedOption ? COLORS.WARNING_BG : undefined
-      },
-        `${option.label}`
-      )
-    );
+    elements.push(createMenuItem(option, index, selectedOption, COLORS.WARNING_BG));
   });
 
-  outputElements.push(
-    React.createElement(Box, { key: 'spacer4', height: 1 }),
-    React.createElement(Text, { key: 'instructions', color: COLORS.SECONDARY, italic: true },
+  elements.push(
+    spacer('spacer4'),
+    createText({ key: 'instructions', color: COLORS.SECONDARY, italic: true },
       'Use ↑/↓ to navigate, Enter to select'
     )
   );
 
-  return React.createElement(Box, { flexDirection: 'column', padding: 1 }, outputElements);
+  return createBox({ flexDirection: 'column', padding: 1 }, elements);
 });
 
 const JobStatusView = React.memo(({ output, jobInfo, loading, error }) => {
-  const outputElements = [
-    React.createElement(Text, { key: 'title', bold: true, color: COLORS.PRIMARY },
-      '📊 Job Status'
-    ),
-    React.createElement(Text, { key: 'job-info', color: COLORS.SECONDARY },
-      `Notebook: ${jobInfo.notebook}`
-    ),
-    React.createElement(Box, { key: 'spacer', height: 1 })
+  const elements = [
+    createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, '📊 Job Status'),
+    createText({ key: 'job-info', color: COLORS.SECONDARY }, `Notebook: ${jobInfo.notebook}`),
+    spacer()
   ];
 
-  if (loading) {
-    outputElements.push(
-      React.createElement(Text, { key: 'loading', color: COLORS.WARNING }, '⏳ Checking job status...')
-    );
-  } else if (error) {
-    outputElements.push(
-      React.createElement(Text, { key: 'error-title', color: COLORS.ERROR, bold: true }, '❌ Error:'),
-      React.createElement(Text, { key: 'error-text', color: COLORS.ERROR }, error)
-    );
+  const loadingOrError = h(LoadingOrError, {
+    key: 'loading-error',
+    loading,
+    error,
+    loadingMessage: 'Checking job status...'
+  });
+
+  if (loadingOrError) {
+    elements.push(loadingOrError);
   } else if (output) {
-    const statusInfo = utils.parseJobStatus(output);
+    const statusInfo = ParsingUtils.parseJobStatus(output);
+    const statusConfig = STATUS_CONFIG[statusInfo.status] || STATUS_CONFIG['Unknown'];
 
-    // Status with appropriate color and icon
-    let statusColor = COLORS.WARNING;
-    let statusIcon = '⏳';
-
-    if (statusInfo.status === 'Completed' || statusInfo.status === 'Succeeded') {
-      statusColor = COLORS.SUCCESS;
-      statusIcon = '✅';
-    } else if (statusInfo.status === 'Failed') {
-      statusColor = COLORS.ERROR;
-      statusIcon = '❌';
-    } else if (statusInfo.status === 'InProgress') {
-      statusColor = COLORS.WARNING;
-      statusIcon = '🔄';
-    }
-
-    outputElements.push(
-      React.createElement(Text, { key: 'status', bold: true, color: statusColor },
-        `${statusIcon} Status: ${statusInfo.status}`
+    elements.push(
+      createText({ key: 'status', bold: true, color: statusConfig.color },
+        `${statusConfig.icon} Status: ${statusInfo.status}`
       ),
-      React.createElement(Text, { key: 'start-time', color: COLORS.PRIMARY },
-        `🕐 Start Time: ${utils.formatDateTime(statusInfo.startTime)}`
+      createText({ key: 'start-time', color: COLORS.PRIMARY },
+        `🕐 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}`
       ),
-      React.createElement(Text, { key: 'end-time', color: COLORS.PRIMARY },
-        `🏁 End Time: ${statusInfo.endTime ? utils.formatDateTime(statusInfo.endTime) : 'Still running...'}`
+      createText({ key: 'end-time', color: COLORS.PRIMARY },
+        `🏁 End Time: ${statusInfo.endTime ? ParsingUtils.formatDateTime(statusInfo.endTime) : 'Still running...'}`
       )
     );
-    
+
     if (statusInfo.status === 'InProgress') {
-      outputElements.push(
-        React.createElement(Box, { key: 'spacer3', height: 1 }),
-        React.createElement(Text, { key: 'duration', color: COLORS.SECONDARY, italic: true },
+      elements.push(
+        spacer('spacer3'),
+        createText({ key: 'duration', color: COLORS.SECONDARY, italic: true },
           `Running for ${Math.floor((Date.now() - jobInfo.startTime) / 1000)} seconds...`
         )
       );
     }
   }
 
-  outputElements.push(
-    React.createElement(Box, { key: 'spacer-final', height: 1 }),
-    React.createElement(Text, { key: 'instructions', color: COLORS.SECONDARY, italic: true },
+  elements.push(
+    spacer('spacer-final'),
+    createText({ key: 'instructions', color: COLORS.SECONDARY, italic: true },
       "Press 'r' to refresh, Enter to return to job menu, 'q' to return to main menu"
     )
   );
 
-  return React.createElement(Box, { flexDirection: 'column', padding: 1 }, outputElements);
+  return createBox({ flexDirection: 'column', padding: 1 }, elements);
 });
 
 const OutputView = React.memo(({ output, error, loading, title, activeJobs, currentNotebook }) => {
-  const outputElements = [
-    React.createElement(Text, { key: 'title', bold: true, color: COLORS.PRIMARY },
-      `📋 ${title || 'Output'}`
-    ),
-    React.createElement(Box, { key: 'spacer', height: 1 })
-  ];
-
-  // Loading handled by specific operations
+  const elements = [];
 
   if (error) {
-    outputElements.push(
-      React.createElement(Text, { key: 'error-title', color: COLORS.ERROR, bold: true }, '❌ Error:'),
-      React.createElement(Text, { key: 'error-text', color: COLORS.ERROR }, error)
-    );
+    elements.push(...createErrorDisplay(error));
   }
 
   if (output) {
-    // Always display output in a clean, minimal way
     const lines = output.split('\n');
-
     lines.forEach((line, index) => {
       if (line.trim()) {
         let color = COLORS.PRIMARY;
         let bold = false;
 
-        // Style different types of lines appropriately
         if (line.includes('🔄') || line.includes('Starting')) {
           color = COLORS.PRIMARY;
           bold = true;
@@ -1220,49 +1088,20 @@ const OutputView = React.memo(({ output, error, loading, title, activeJobs, curr
           color = COLORS.SECONDARY;
         }
 
-        outputElements.push(
-          React.createElement(Text, {
-            key: `line-${index}`,
-            color,
-            bold
-          }, line)
-        );
+        elements.push(createText({ key: `line-${index}`, color, bold }, line));
       } else {
-        // Empty line for spacing
-        outputElements.push(
-          React.createElement(Box, { key: `spacer-${index}`, height: 1 })
-        );
+        elements.push(spacer(`spacer-${index}`));
       }
     });
   }
 
-  // Active jobs display removed
-
   if (!loading && !output && !error) {
-    outputElements.push(
-      React.createElement(Text, { key: 'no-output', color: COLORS.WARNING }, 'No output received')
-    );
+    elements.push(createText({ key: 'no-output', color: COLORS.WARNING }, 'No output received'));
   }
 
-  return React.createElement(Box, {
-    flexDirection: 'column',
-    padding: 1,
-    height: '100%',
-    overflowY: 'hidden'
-  }, outputElements);
+  return createBox({ flexDirection: 'column', padding: 1, height: '100%', overflowY: 'hidden' }, elements);
 });
 
-const ErrorBoundary = ({ children, fallback }) => {
-  const [hasError, setHasError] = useState(false);
-
-  if (hasError) {
-    return fallback || React.createElement(Text, { color: COLORS.ERROR }, 'Something went wrong!');
-  }
-
-  return children;
-};
-
-// ASCII Art Component
 const LoadingScreen = React.memo(() => {
   const asciiArt = `
 ██╗    ██╗███████╗ █████╗ ██╗   ██╗███████╗
@@ -1270,44 +1109,30 @@ const LoadingScreen = React.memo(() => {
 ██║ █╗ ██║█████╗  ███████║██║   ██║█████╗  
 ██║███╗██║██╔══╝  ██╔══██║╚██╗ ██╔╝██╔══╝  
 ╚███╔███╔╝███████╗██║  ██║ ╚████╔╝ ███████╗
- ╚══╝╚══╝ ╚══════╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝
-                                           `;
+ ╚══╝╚══╝ ╚══════╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝`;
 
-  return React.createElement(Box, {
+  return createBox({
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
     height: '100%'
   }, [
-    React.createElement(Text, {
-      key: 'ascii',
-      color: COLORS.PRIMARY,
-      bold: true
-    }, asciiArt),
-    React.createElement(Text, {
-      key: 'version',
-      color: COLORS.SECONDARY,
-      dimColor: true
-    }, 'v0.1.0')
+    createText({ key: 'ascii', color: COLORS.PRIMARY, bold: true }, asciiArt),
+    createText({ key: 'version', color: COLORS.SECONDARY, dimColor: true }, 'v0.1.0')
   ]);
 });
 
-// Main Application Component
+// ===== MAIN APPLICATION =====
 const FabricCLI = () => {
   const { state, actions } = useFabricState();
   const { executeCommand, executeCommandWithRetry, executeCommandWithStatusUpdates } = useCommandExecution(actions, state.config);
   const { exit } = useApp();
   const [showLoadingScreen, setShowLoadingScreen] = useState(true);
 
-  // Show loading screen for 1 second on startup
-  React.useEffect(() => {
-    const timer = setTimeout(() => {
-      setShowLoadingScreen(false);
-    }, 1500);
-
+  useEffect(() => {
+    const timer = setTimeout(() => setShowLoadingScreen(false), TIMEOUTS.LOADING_SCREEN);
     return () => clearTimeout(timer);
   }, []);
-
 
   const handleInteractiveShell = useCallback(() => {
     exit();
@@ -1343,8 +1168,15 @@ const FabricCLI = () => {
     }, 100);
   }, [exit]);
 
+  const menuOptions = [
+    { label: 'Workspaces', command: CommandBuilder.listWorkspaces(), view: VIEWS.WORKSPACES },
+    { label: 'Manual Interactive Shell', action: 'interactive' },
+    { label: 'Command History', action: 'history', view: VIEWS.COMMAND_HISTORY },
+    { label: 'Exit', action: 'exit' }
+  ];
+
   const handleMenuSelection = useCallback(async () => {
-    const selected = MENU_OPTIONS[state.selectedOption];
+    const selected = menuOptions[state.selectedOption];
 
     if (selected.action === 'exit') {
       process.exit(0);
@@ -1365,32 +1197,32 @@ const FabricCLI = () => {
     actions.setWorkspaces([]);
     actions.setSelectedWorkspace(0);
 
-    // Use retry logic for workspace loading
-    const result = selected.command === COMMANDS.LIST_WORKSPACES
-      ? await executeCommandWithRetry(selected.command, { timeout: 15000 })
+    const result = selected.command === CommandBuilder.listWorkspaces()
+      ? await executeCommandWithRetry(selected.command, { timeout: TIMEOUTS.WORKSPACE_LOAD })
       : await executeCommand(selected.command);
 
-    if (result.success && selected.command === COMMANDS.LIST_WORKSPACES) {
-      const workspaceList = utils.parseWorkspaces(result.output);
+    if (result.success && selected.command === CommandBuilder.listWorkspaces()) {
+      const workspaceList = ParsingUtils.parseWorkspaces(result.output);
       actions.setWorkspaces(workspaceList);
     }
-  }, [state.selectedOption, actions, executeCommand, executeCommandWithRetry, exit, handleInteractiveShell]);
+  }, [state.selectedOption, actions, executeCommand, executeCommandWithRetry, handleInteractiveShell]);
 
   const handleWorkspaceSelection = useCallback(async () => {
     if (state.workspaces.length === 0) return;
 
     const selectedWorkspaceName = state.workspaces[state.selectedWorkspace];
-    const command = COMMANDS.LIST_WORKSPACE(selectedWorkspaceName);
+    const command = CommandBuilder.listWorkspace(selectedWorkspaceName);
 
-    // Switch to workspace items view first to show correct loading message
-    actions.setCurrentView(VIEWS.WORKSPACE_ITEMS);
-    actions.setWorkspaceItems([]);
-    actions.setSelectedWorkspaceItem(0);
+    actions.updateState({
+      currentView: VIEWS.WORKSPACE_ITEMS,
+      workspaceItems: [],
+      selectedWorkspaceItem: 0
+    });
 
     const result = await executeCommand(command);
 
     if (result.success) {
-      const items = utils.parseWorkspaceItems(result.output);
+      const items = ParsingUtils.parseWorkspaceItems(result.output);
       actions.setWorkspaceItems(items);
     } else {
       actions.setCurrentView(VIEWS.WORKSPACES);
@@ -1403,18 +1235,15 @@ const FabricCLI = () => {
     const selectedItem = state.workspaceItems[state.selectedWorkspaceItem];
     const selectedWorkspaceName = state.workspaces[state.selectedWorkspace];
 
-    // Handle both string and object formats
     const itemName = typeof selectedItem === 'string' ? selectedItem : selectedItem.name;
-    const isNotebook = utils.isNotebook(selectedItem);
+    const isNotebook = ParsingUtils.isNotebook(selectedItem);
 
     if (isNotebook) {
-      // Show notebook actions menu instead of directly running
-      actions.setCurrentNotebook({
-        name: itemName,
-        workspace: selectedWorkspaceName
+      actions.updateState({
+        currentNotebook: { name: itemName, workspace: selectedWorkspaceName },
+        selectedNotebookAction: 0,
+        currentView: VIEWS.NOTEBOOK_ACTIONS
       });
-      actions.setSelectedNotebookAction(0);
-      actions.setCurrentView(VIEWS.NOTEBOOK_ACTIONS);
     } else {
       actions.setError(`Selected item "${itemName}" is not a notebook. Only .Notebook items can be started.`);
       actions.setCurrentView(VIEWS.OUTPUT);
@@ -1424,121 +1253,105 @@ const FabricCLI = () => {
   const handleNotebookActionSelection = useCallback(async () => {
     if (!state.currentNotebook) return;
 
-    const options = [
-      { action: 'run' },
-      { action: 'run-sync' },
-      { action: 'view-last-job' },
-      { action: 'return' }
-    ];
+    const actionHandlers = {
+      0: async () => { // Run in background
+        const command = CommandBuilder.job.start(state.currentNotebook.workspace, state.currentNotebook.name);
+        actions.setCurrentView(VIEWS.OUTPUT);
+        actions.setOutput('🚀 Starting job in background...');
 
-    const selected = options[state.selectedNotebookAction];
-
-    if (selected.action === 'run') {
-      // Start the job in background and show success message
-      const command = COMMANDS.JOB_START(state.currentNotebook.workspace, state.currentNotebook.name);
-      actions.setCurrentView(VIEWS.OUTPUT);
-      actions.setOutput('🚀 Starting job in background...');
-      
-      const result = await executeCommand(command, { silent: true });
-
-      if (result.success) {
-        const jobId = utils.formatJobId(result.output);
-        if (jobId) {
-          actions.addActiveJob(jobId, state.currentNotebook.workspace, state.currentNotebook.name);
-          actions.setOutput(
-            `✅ Job started successfully in background\n\n` +
-            `📍 Job ID: ${jobId}\n\n` +
-            `💡 Use 'View Last Job Details' to check status\n\n` +
-            `💡 Press 'q' or ESC to return to notebook actions menu`
-          );
-        } else {
-          actions.setOutput(
-            `❌ Failed to extract job ID\n\n💡 Press 'q' or ESC to return to notebook actions menu`
-          );
-        }
-      } else {
-        actions.setOutput(
-          `❌ Failed to start job: ${result.error}\n\n💡 Press 'q' or ESC to return to notebook actions menu`
-        );
-      }
-    } else if (selected.action === 'run-sync') {
-      // Run job synchronously with status updates
-      const command = COMMANDS.JOB_RUN_SYNC(state.currentNotebook.workspace, state.currentNotebook.name);
-
-      actions.setCurrentView(VIEWS.OUTPUT);
-      actions.setOutput('🔄 Starting synchronous job execution...\n');
-
-      try {
-        const result = await executeCommandWithStatusUpdates(command, { timeout: 600000 }); // 10 minute timeout
+        const result = await executeCommand(command, { silent: true });
 
         if (result.success) {
-          const runInfo = utils.parseJobRunOutput(result.output);
-          actions.markJobCompleted(state.currentNotebook.workspace, state.currentNotebook.name);
-          actions.setOutput(
-            `✅ Job completed successfully (${result.duration}s)\n\n` +
-            `💡 Press 'q' or ESC to return to notebook actions menu`
-          );
-        }
-      } catch (error) {
-        actions.markJobCompleted(state.currentNotebook.workspace, state.currentNotebook.name);
-        actions.setOutput(`❌ Job failed: ${error.message}\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
-      }
-    } else if (selected.action === 'view-last-job') {
-      // View last job details - first get job list to find latest job ID
-      const listCommand = COMMANDS.JOB_LIST(state.currentNotebook.workspace, state.currentNotebook.name);
-      actions.setCurrentView(VIEWS.OUTPUT);
-      actions.setOutput('🔍 Getting job details...');
-      
-      const listResult = await executeCommand(listCommand, { skipCache: true, silent: true });
-      if (listResult.success) {
-        // Parse job list to find the most recent job ID
-        // Look for any job ID in the entire output (most recent should be first)
-        const jobIdMatch = listResult.output.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/);
-        
-        if (jobIdMatch) {
-          const jobId = jobIdMatch[1];
-          // Now get detailed status using run-status command
-          const statusCommand = COMMANDS.JOB_STATUS(state.currentNotebook.workspace, state.currentNotebook.name, jobId);
-          const statusResult = await executeCommand(statusCommand, { skipCache: true });
-          
-          if (statusResult.success) {
-            const statusInfo = utils.parseJobStatus(statusResult.output);
-            
+          const jobId = ParsingUtils.extractJobId(result.output);
+          if (jobId) {
+            actions.addActiveJob(jobId, state.currentNotebook.workspace, state.currentNotebook.name);
             actions.setOutput(
-              `📊 Last Job Details:\n\n` +
-              `🔖 Job ID: ${jobId}\n` +
-              `📋 Status: ${statusInfo.status}\n` +
-              `🕐 Start Time: ${utils.formatDateTime(statusInfo.startTime)}\n` +
-              `🏁 End Time: ${statusInfo.endTime ? utils.formatDateTime(statusInfo.endTime) : 'Still running...'}\n\n` +
+              `✅ Job started successfully in background\n\n` +
+              `📍 Job ID: ${jobId}\n\n` +
+              `💡 Use 'View Last Job Details' to check status\n\n` +
               `💡 Press 'q' or ESC to return to notebook actions menu`
             );
           } else {
-            actions.setOutput(
-              `❌ Failed to get job details\n\n💡 Press 'q' or ESC to return to notebook actions menu`
-            );
+            actions.setOutput(`❌ Failed to extract job ID\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
           }
         } else {
-          actions.setOutput(
-            `ℹ️ No job history found for this notebook\n\n💡 Press 'q' or ESC to return to notebook actions menu`
-          );
+          actions.setOutput(`❌ Failed to start job: ${result.error}\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
         }
-      } else {
-        actions.setOutput(
-          `❌ Failed to get job list\n\n💡 Press 'q' or ESC to return to notebook actions menu`
-        );
+      },
+
+      1: async () => { // Run synchronously
+        const command = CommandBuilder.job.runSync(state.currentNotebook.workspace, state.currentNotebook.name);
+        actions.setCurrentView(VIEWS.OUTPUT);
+        actions.setOutput('🔄 Starting synchronous job execution...\n');
+
+        try {
+          const result = await executeCommandWithStatusUpdates(command, { timeout: TIMEOUTS.JOB_RUN });
+
+          if (result.success) {
+            actions.markJobCompleted(state.currentNotebook.workspace, state.currentNotebook.name);
+            actions.setOutput(
+              `✅ Job completed successfully (${result.duration}s)\n\n` +
+              `💡 Press 'q' or ESC to return to notebook actions menu`
+            );
+          }
+        } catch (error) {
+          actions.markJobCompleted(state.currentNotebook.workspace, state.currentNotebook.name);
+          actions.setOutput(`❌ Job failed: ${error.message}\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
+        }
+      },
+
+      2: async () => { // View last job details
+        const listCommand = CommandBuilder.job.list(state.currentNotebook.workspace, state.currentNotebook.name);
+        actions.setCurrentView(VIEWS.OUTPUT);
+        actions.setOutput('🔍 Getting job details...');
+
+        const listResult = await executeCommand(listCommand, { skipCache: true, silent: true });
+        if (listResult.success) {
+          const jobId = ParsingUtils.extractGuid(listResult.output);
+
+          if (jobId) {
+            const statusCommand = CommandBuilder.job.status(state.currentNotebook.workspace, state.currentNotebook.name, jobId);
+            const statusResult = await executeCommand(statusCommand, { skipCache: true });
+
+            if (statusResult.success) {
+              const statusInfo = ParsingUtils.parseJobStatus(statusResult.output);
+
+              actions.setOutput(
+                `📊 Last Job Details:\n\n` +
+                `🔖 Job ID: ${jobId}\n` +
+                `📋 Status: ${statusInfo.status}\n` +
+                `🕐 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}\n` +
+                `🏁 End Time: ${statusInfo.endTime ? ParsingUtils.formatDateTime(statusInfo.endTime) : 'Still running...'}\n\n` +
+                `💡 Press 'q' or ESC to return to notebook actions menu`
+              );
+            } else {
+              actions.setOutput(`❌ Failed to get job details\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
+            }
+          } else {
+            actions.setOutput(`ℹ️ No job history found for this notebook\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
+          }
+        } else {
+          actions.setOutput(`❌ Failed to get job list\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
+        }
+      },
+
+      3: () => { // Return
+        actions.updateState({
+          currentView: VIEWS.WORKSPACE_ITEMS,
+          selectedNotebookAction: 0,
+          currentNotebook: null
+        });
       }
-    } else if (selected.action === 'return') {
-      // Return to workspace items
-      actions.setCurrentView(VIEWS.WORKSPACE_ITEMS);
-      actions.setSelectedNotebookAction(0);
-      actions.setCurrentNotebook(null);
-    }
+    };
+
+    const handler = actionHandlers[state.selectedNotebookAction];
+    if (handler) await handler();
   }, [state.currentNotebook, state.selectedNotebookAction, actions, executeCommand, executeCommandWithStatusUpdates]);
 
   const checkJobStatus = useCallback(async () => {
     if (!state.currentJob) return;
 
-    const command = COMMANDS.JOB_STATUS(
+    const command = CommandBuilder.job.status(
       state.currentJob.workspace,
       state.currentJob.notebook,
       state.currentJob.jobId
@@ -1546,10 +1359,9 @@ const FabricCLI = () => {
 
     const result = await executeCommand(command, { skipCache: true });
 
-    // Check if job is completed and mark it
     if (result.success) {
-      const statusInfo = utils.parseJobStatus(result.output);
-      if (statusInfo.status === 'Completed' || statusInfo.status === 'Succeeded' || statusInfo.status === 'Failed') {
+      const statusInfo = ParsingUtils.parseJobStatus(result.output);
+      if (['Completed', 'Succeeded', 'Failed'].includes(statusInfo.status)) {
         actions.markJobCompleted(state.currentJob.workspace, state.currentJob.notebook);
       }
     }
@@ -1558,92 +1370,53 @@ const FabricCLI = () => {
   const handleJobMenuSelection = useCallback(async () => {
     if (!state.currentJob) return;
 
-    const options = [
-      { action: 'status' },
-      { action: 'run-sync' },
-      { action: 'return' }
-    ];
+    const actionHandlers = {
+      0: async () => { // Check status
+        actions.setCurrentView(VIEWS.JOB_STATUS);
+        await checkJobStatus();
+      },
 
-    const selected = options[state.selectedJobOption];
+      1: async () => { // Run synchronously
+        const command = CommandBuilder.job.runSync(state.currentJob.workspace, state.currentJob.notebook);
+        actions.setCurrentView(VIEWS.OUTPUT);
+        actions.setOutput('🔄 Starting synchronous job execution...\n');
 
-    if (selected.action === 'status') {
-      // Check job status
-      actions.setCurrentView(VIEWS.JOB_STATUS);
-      await checkJobStatus();
-    } else if (selected.action === 'run-sync') {
-      // Run job synchronously with status updates
-      const command = COMMANDS.JOB_RUN_SYNC(
-        state.currentJob.workspace,
-        state.currentJob.notebook
-      );
-
-      actions.setCurrentView(VIEWS.OUTPUT);
-      actions.setOutput('🔄 Starting synchronous job execution...\n');
-
-      try {
-        const result = await executeCommandWithStatusUpdates(command, { timeout: 600000 }); // 10 minute timeout
-
-        if (result.success) {
-          const runInfo = utils.parseJobRunOutput(result.output);
-          actions.setOutput(
-            `✅ Job completed successfully (${result.duration}s)\n\n` +
-            `💡 Press 'q' or ESC to return to main menu`
-          );
+        try {
+          const result = await executeCommandWithStatusUpdates(command, { timeout: TIMEOUTS.JOB_RUN });
+          if (result.success) {
+            actions.setOutput(
+              `✅ Job completed successfully (${result.duration}s)\n\n` +
+              `💡 Press 'q' or ESC to return to main menu`
+            );
+          }
+        } catch (error) {
+          actions.setOutput(`❌ Job failed: ${error.message}\n\n💡 Press 'q' or ESC to return to main menu`);
         }
-      } catch (error) {
-        actions.setOutput(`❌ Job failed: ${error.message}\n\n💡 Press 'q' or ESC to return to main menu`);
+      },
+
+      2: () => { // Return
+        actions.updateState({
+          currentView: VIEWS.WORKSPACE_ITEMS,
+          selectedJobOption: 0
+        });
       }
-    } else if (selected.action === 'return') {
-      // Return to workspace items
-      actions.setCurrentView(VIEWS.WORKSPACE_ITEMS);
-      actions.setSelectedJobOption(0);
-    }
-  }, [state.currentJob, state.selectedJobOption, actions, checkJobStatus, executeCommand, executeCommandWithStatusUpdates]);
+    };
+
+    const handler = actionHandlers[state.selectedJobOption];
+    if (handler) await handler();
+  }, [state.currentJob, state.selectedJobOption, actions, checkJobStatus, executeCommandWithStatusUpdates]);
 
   const refreshWorkspaces = useCallback(async () => {
-    const result = await executeCommandWithRetry(COMMANDS.LIST_WORKSPACES, {
-      timeout: 15000,
+    const result = await executeCommandWithRetry(CommandBuilder.listWorkspaces(), {
+      timeout: TIMEOUTS.WORKSPACE_LOAD,
       skipCache: true
     });
 
     if (result.success) {
-      const workspaceList = utils.parseWorkspaces(result.output);
+      const workspaceList = ParsingUtils.parseWorkspaces(result.output);
       actions.setWorkspaces(workspaceList);
     }
   }, [executeCommandWithRetry, actions]);
-
-  const showHelp = useCallback((context) => {
-    const helpTexts = {
-      'main': 
-        'Main Menu Help:\\n\\n' +
-        '↑/↓ - Navigate options\\n' +
-        'Enter - Select option\\n' +
-        'h - Show this help\\n' +
-        'q/ESC - Quit application',
-      'workspaces': 
-        'Workspaces Help:\\n\\n' +
-        '↑/↓ - Navigate workspaces\\n' +
-        'Enter - Select workspace\\n' +
-        'r - Refresh workspaces\\n' +
-        'h - Show this help\\n' +
-        'q/ESC - Return to main menu',
-      'workspace-items': 
-        'Workspace Items Help:\\n\\n' +
-        '↑/↓ - Navigate items\\n' +
-        'Enter - Select .Notebook items\\n' +
-        'h - Show this help\\n' +
-        'q/ESC - Return to workspaces',
-      'notebook-actions': 
-        'Notebook Actions Help:\\n\\n' +
-        '↑/↓ - Navigate options\\n' +
-        'Enter - Select action\\n' +
-        'h - Show this help\\n' +
-        'q/ESC - Return to workspace items'
-    };
-    
-    actions.setCurrentView(VIEWS.OUTPUT);
-    actions.setOutput(helpTexts[context] || 'Help not available for this view');
-  }, [actions]);
 
   const handlers = useMemo(() => ({
     handleMenuSelection,
@@ -1652,108 +1425,80 @@ const FabricCLI = () => {
     handleNotebookActionSelection,
     handleJobMenuSelection,
     checkJobStatus,
-    refreshWorkspaces,
-    showHelp
-  }), [handleMenuSelection, handleWorkspaceSelection, handleWorkspaceItemSelection, handleNotebookActionSelection, handleJobMenuSelection, checkJobStatus, refreshWorkspaces, showHelp]);
+    refreshWorkspaces
+  }), [
+    handleMenuSelection,
+    handleWorkspaceSelection,
+    handleWorkspaceItemSelection,
+    handleNotebookActionSelection,
+    handleJobMenuSelection,
+    checkJobStatus,
+    refreshWorkspaces
+  ]);
 
-  const currentInputHandler = useInputHandlers(state, actions, handlers);
+  const inputHandlers = createInputHandlers(state, actions, handlers);
+  const currentInputHandler = inputHandlers[state.currentView] || inputHandlers.default;
 
   useInput((input, key) => {
     if (state.inInteractiveMode) return;
-
     currentInputHandler(input, key);
-
-    if (input === 'q' && state.currentView === VIEWS.MAIN) {
-      exit();
-    }
+    if (input === 'q' && state.currentView === VIEWS.MAIN) exit();
   });
 
-  // Don't render anything while in interactive mode
-  if (state.inInteractiveMode) {
-    return React.createElement(Box, {}, []);
-  }
+  if (state.inInteractiveMode) return createBox({}, []);
+  if (showLoadingScreen) return h(LoadingScreen);
 
-  // Show loading screen on startup
-  if (showLoadingScreen) {
-    return React.createElement(LoadingScreen);
-  }
+  const viewComponents = {
+    [VIEWS.MAIN]: () => h(MainMenu, { selectedOption: state.selectedOption, menuOptions }),
+    [VIEWS.WORKSPACES]: () => h(WorkspacesList, {
+      workspaces: state.workspaces,
+      selectedWorkspace: state.selectedWorkspace,
+      loading: state.loading,
+      error: state.error,
+      loadingProgress: state.loadingProgress
+    }),
+    [VIEWS.WORKSPACE_ITEMS]: () => h(WorkspaceItems, {
+      items: state.workspaceItems,
+      selectedItem: state.selectedWorkspaceItem,
+      workspaceName: state.workspaces[state.selectedWorkspace],
+      loading: state.loading,
+      error: state.error
+    }),
+    [VIEWS.COMMAND_HISTORY]: () => h(CommandHistory, { history: state.commandHistory }),
+    [VIEWS.NOTEBOOK_ACTIONS]: () => h(NotebookActionsMenu, {
+      notebook: state.currentNotebook?.name,
+      workspace: state.currentNotebook?.workspace,
+      selectedOption: state.selectedNotebookAction,
+      completedJobs: state.completedJobs,
+      activeJobs: state.activeJobs,
+      currentJob: state.currentJob
+    }),
+    [VIEWS.JOB_MENU]: () => h(JobMenu, {
+      job: state.currentJob,
+      selectedOption: state.selectedJobOption
+    }),
+    [VIEWS.JOB_STATUS]: () => h(JobStatusView, {
+      output: state.output,
+      jobInfo: state.currentJob,
+      loading: state.loading,
+      error: state.error
+    }),
+    [VIEWS.OUTPUT]: () => h(OutputView, {
+      output: state.output,
+      error: state.error,
+      loading: state.loading,
+      title: state.currentNotebook ? 'Job Output' : menuOptions[state.selectedOption]?.label,
+      activeJobs: state.activeJobs,
+      currentNotebook: state.currentNotebook
+    })
+  };
 
-  // Render appropriate view
-  return React.createElement(ErrorBoundary, {},
-    (() => {
-      switch (state.currentView) {
-        case VIEWS.MAIN:
-          return React.createElement(MainMenu, {
-            selectedOption: state.selectedOption
-          });
-
-        case VIEWS.WORKSPACES:
-          return React.createElement(WorkspacesList, {
-            workspaces: state.workspaces,
-            selectedWorkspace: state.selectedWorkspace,
-            loading: state.loading,
-            error: state.error,
-            loadingProgress: state.loadingProgress
-          });
-
-        case VIEWS.WORKSPACE_ITEMS:
-          return React.createElement(WorkspaceItems, {
-            items: state.workspaceItems,
-            selectedItem: state.selectedWorkspaceItem,
-            workspaceName: state.workspaces[state.selectedWorkspace],
-            loading: state.loading,
-            error: state.error
-          });
-
-        case VIEWS.COMMAND_HISTORY:
-          return React.createElement(CommandHistory, {
-            history: state.commandHistory
-          });
-
-        case VIEWS.NOTEBOOK_ACTIONS:
-          return React.createElement(NotebookActionsMenu, {
-            notebook: state.currentNotebook?.name,
-            workspace: state.currentNotebook?.workspace,
-            selectedOption: state.selectedNotebookAction,
-            completedJobs: state.completedJobs,
-            activeJobs: state.activeJobs,
-            currentJob: state.currentJob
-          });
-
-        case VIEWS.JOB_MENU:
-          return React.createElement(JobMenu, {
-            job: state.currentJob,
-            selectedOption: state.selectedJobOption
-          });
-
-        case VIEWS.JOB_STATUS:
-          return React.createElement(JobStatusView, {
-            output: state.output,
-            jobInfo: state.currentJob,
-            loading: state.loading,
-            error: state.error
-          });
-
-        case VIEWS.OUTPUT:
-          return React.createElement(OutputView, {
-            output: state.output,
-            error: state.error,
-            loading: state.loading,
-            title: MENU_OPTIONS[state.selectedOption]?.label,
-            activeJobs: state.activeJobs,
-            currentNotebook: state.currentNotebook
-          });
-
-        default:
-          return React.createElement(MainMenu, {
-            selectedOption: state.selectedOption
-          });
-      }
-    })()
-  );
+  const Component = viewComponents[state.currentView] || viewComponents[VIEWS.MAIN];
+  return Component();
 };
 
-// Clear console on startup to hide npm output
+// Clear console and render
 console.clear();
+render(h(FabricCLI));
 
-render(React.createElement(FabricCLI));
+
