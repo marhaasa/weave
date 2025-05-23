@@ -12,7 +12,7 @@ An interactive Terminal User Interface (TUI) for Microsoft Fabric CLI built with
 
 1. Clone this repository:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/marhaasa/weave.git
    cd weave
    ```
 
