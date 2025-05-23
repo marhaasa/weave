@@ -1,0 +1,30 @@
+{
+  "name": "weave",
+  "version": "0.1.0",
+  "description": "Interactive TUI for Microsoft Fabric CLI",
+  "main": "weave.js",
+  "type": "module",
+  "bin": {
+    "fabric-tui": "./weave.js"
+  },
+  "scripts": {
+    "start": "node weave.js",
+    "dev": "node weave.js"
+  },
+  "dependencies": {
+    "ink": "^4.4.1",
+    "react": "^18.3.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": [
+    "fabric",
+    "cli",
+    "tui",
+    "microsoft",
+    "terminal"
+  ],
+  "author": "Marius Høgli Aasarød",
+  "license": "MIT"
+}
