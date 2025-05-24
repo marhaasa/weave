@@ -1,0 +1,57 @@
+#!/usr/bin/env node
+
+// Weave CLI wrapper
+// This file serves as the entry point when installed via npm or Homebrew
+
+const path = require('path');
+const fs = require('fs');
+
+// Handle command line arguments
+const args = process.argv.slice(2);
+
+if (args.includes('--help') || args.includes('-h')) {
+  console.log(`
+Weave - An interactive TUI for Microsoft Fabric CLI
+
+Usage: weave [options]
+
+Options:
+  -h, --help     Show this help message
+  -v, --version  Show version information
+
+Navigation:
+  ↑/↓            Navigate through options
+  Enter          Select an option
+  q/ESC          Go back or quit
+  r              Refresh (in workspace view)
+
+For more information, visit: https://github.com/marhaasa/weave
+`);
+  process.exit(0);
+}
+
+if (args.includes('--version') || args.includes('-v')) {
+  try {
+    const packagePath = path.join(__dirname, '..', 'package.json');
+    const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+    console.log(`weave v${packageJson.version}`);
+  } catch (err) {
+    console.log('weave v0.1.0');
+  }
+  process.exit(0);
+}
+
+// Handle different installation scenarios
+try {
+  // Try to load from parent directory (normal case)
+  require(path.join(__dirname, '..', 'weave.js'));
+} catch (err) {
+  // If that fails, we might be in a different structure
+  try {
+    require(path.join(__dirname, 'weave.js'));
+  } catch (err2) {
+    console.error('Error: Could not find weave.js');
+    console.error('Please ensure the package is installed correctly.');
+    process.exit(1);
+  }
+}

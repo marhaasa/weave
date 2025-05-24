@@ -1,0 +1,150 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: |
+            Release ${{ steps.get_version.outputs.version }}
+            
+            ## Installation
+            
+            ```bash
+            brew tap ${{ github.repository_owner }}/tools
+            brew install weave
+            ```
+            
+            ## Changelog
+            
+            - See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details
+          draft: false
+          prerelease: false
+
+  build-and-package:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create tarball
+        run: |
+          mkdir -p dist
+          tar -czf dist/weave-${{ needs.create-release.outputs.version }}.tar.gz \
+            --exclude='.git*' \
+            --exclude='dist' \
+            --exclude='node_modules' \
+            --exclude='.github' \
+            .
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./dist/weave-${{ needs.create-release.outputs.version }}.tar.gz
+          asset_name: weave-${{ needs.create-release.outputs.version }}.tar.gz
+          asset_content_type: application/gzip
+
+  update-homebrew-tools:
+    needs: [create-release, build-and-package]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/homebrew-tools
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: homebrew-tools
+
+      - name: Download release tarball
+        run: |
+          curl -L -o weave.tar.gz \
+            https://github.com/${{ github.repository }}/releases/download/v${{ needs.create-release.outputs.version }}/weave-${{ needs.create-release.outputs.version }}.tar.gz
+
+      - name: Calculate SHA256
+        id: calculate_sha
+        run: |
+          SHA256=$(sha256sum weave.tar.gz | cut -d' ' -f1)
+          echo "sha256=${SHA256}" >> $GITHUB_OUTPUT
+
+      - name: Update Formula
+        run: |
+          cd homebrew-tools
+          cat > Formula/weave.rb << EOF
+          class Weave < Formula
+            desc "An interactive TUI for Microsoft Fabric CLI"
+            homepage "https://github.com/${{ github.repository }}"
+            url "https://github.com/${{ github.repository }}/releases/download/v${{ needs.create-release.outputs.version }}/weave-${{ needs.create-release.outputs.version }}.tar.gz"
+            sha256 "${{ steps.calculate_sha.outputs.sha256 }}"
+            license "MIT"
+            version "${{ needs.create-release.outputs.version }}"
+            
+            depends_on "node"
+            
+            def install
+              # Install all files to libexec
+              libexec.install Dir["*"]
+              
+              # Install npm dependencies
+              cd libexec do
+                system "npm", "ci", "--production"
+              end
+              
+              # Create wrapper script
+              (bin/"weave").write <<~EOS
+                #!/bin/bash
+                export NODE_PATH="#{libexec}/node_modules"
+                exec "#{Formula["node"].opt_bin}/node" "#{libexec}/weave.js" "$@"
+              EOS
+              
+              # Make wrapper executable
+              chmod 0755, bin/"weave"
+            end
+            
+            test do
+              assert_match "weave v", shell_output("#{bin}/weave --version")
+            end
+          end
+          EOF
+
+      - name: Commit and push changes
+        run: |
+          cd homebrew-tools
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add Formula/weave.rb
+          git commit -m "Update weave to version ${{ needs.create-release.outputs.version }}"
+          git push

@@ -1,11 +1,11 @@
 {
   "name": "weave",
   "version": "0.1.0",
-  "description": "Interactive TUI for Microsoft Fabric CLI",
+  "description": "An interactive TUI for Microsoft Fabric CLI",
   "main": "weave.js",
   "type": "module",
   "bin": {
-    "fabric-tui": "./weave.js"
+    "weave": "./bin/weave"
   },
   "scripts": {
     "start": "node weave.js",
@@ -26,5 +26,13 @@
     "terminal"
   ],
   "author": "Marius Høgli Aasarød",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marhaasa/weave.git"
+  },
+  "bugs": {
+    "url": "https://github.com/marhaasa/weave/issues"
+  },
+  "homepage": "https://github.com/marhaasa/weave#readme"
 }
