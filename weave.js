@@ -1111,7 +1111,7 @@ const LoadingScreen = React.memo(() => {
   useEffect(() => {
     const loadVersion = async () => {
       try {
-        const packageJson = JSON.parse(await fs.readFile('package.json', 'utf8'));
+        const packageJson = JSON.parse(await fs.readFile(path.join(__dirname, 'package.json'), 'utf8'));
         setVersion(`v${packageJson.version}`);
       } catch (error) {
         console.error('Failed to load version from package.json:', error);
