@@ -5,6 +5,9 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const execAsync = promisify(exec);
 
@@ -1103,6 +1106,20 @@ const OutputView = React.memo(({ output, error, loading, title, activeJobs, curr
 });
 
 const LoadingScreen = React.memo(() => {
+  const [version, setVersion] = useState('v0.1.3');
+
+  useEffect(() => {
+    const loadVersion = async () => {
+      try {
+        const packageJson = JSON.parse(await fs.readFile('package.json', 'utf8'));
+        setVersion(`v${packageJson.version}`);
+      } catch (error) {
+        console.error('Failed to load version from package.json:', error);
+      }
+    };
+    loadVersion();
+  }, []);
+
   const asciiArt = `
 ██╗    ██╗███████╗ █████╗ ██╗   ██╗███████╗
 ██║    ██║██╔════╝██╔══██╗██║   ██║██╔════╝
@@ -1118,7 +1135,7 @@ const LoadingScreen = React.memo(() => {
     height: '100%'
   }, [
     createText({ key: 'ascii', color: COLORS.PRIMARY, bold: true }, asciiArt),
-    createText({ key: 'version', color: COLORS.SECONDARY, dimColor: true }, 'v0.1.0')
+    createText({ key: 'version', color: COLORS.SECONDARY, dimColor: true }, version)
   ]);
 });
 
@@ -1139,7 +1156,7 @@ const FabricCLI = () => {
     setTimeout(() => {
       console.clear();
       console.log('Starting Fabric Interactive Shell...');
-      console.log('When you exit, run "npm start" or "node index.js" to restart the TUI.\n');
+      console.log('When you exit, run "weave" (if installed via homebrew), "npm start" or "node weave.js" to restart the TUI.\n');
 
       const child = spawn('fab', ['auth', 'login'], {
         stdio: 'inherit',
@@ -1154,7 +1171,7 @@ const FabricCLI = () => {
 
       const handleExit = () => {
         console.log('\nInteractive shell closed.');
-        console.log('Run "npm start" or "node index.js" to restart the TUI.');
+        console.log('Run "weave" (if installed via homebrew), "npm start" or "node weave.js" to restart the TUI.');
         process.exit(0);
       };
 
@@ -1162,7 +1179,7 @@ const FabricCLI = () => {
       child.on('exit', handleExit);
       child.on('error', (err) => {
         console.error('Error starting interactive shell:', err.message);
-        console.log('Run "npm start" or "node index.js" to restart the TUI.');
+        console.log('Run "weave" (if installed via homebrew), "npm start" or "node weave.js" to restart the TUI.');
         process.exit(1);
       });
     }, 100);

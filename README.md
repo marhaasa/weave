@@ -10,6 +10,16 @@ An interactive Terminal User Interface (TUI) for [Microsoft Fabric CLI](https://
 
 ## Installation
 
+### Option 1: Homebrew (Recommended)
+
+Install directly from the custom tap:
+```bash
+brew tap marhaasa/tools
+brew install weave
+```
+
+### Option 2: From Source
+
 1. Clone this repository:
    ```bash
    git clone https://github.com/marhaasa/weave.git
@@ -22,6 +32,13 @@ An interactive Terminal User Interface (TUI) for [Microsoft Fabric CLI](https://
    ```
 
 ## Running the TUI
+
+### If installed via Homebrew:
+```bash
+weave
+```
+
+### If installed from source:
 
 Start the application using npm:
 ```bash
