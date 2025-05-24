@@ -35,6 +35,9 @@ brew install weave
 
 ## Running weave
 
+![weave](https://github.com/user-attachments/assets/f9bbf903-869d-484d-b563-f80f17299bfc)
+
+
 ### If installed via Homebrew:
 ```bash
 weave
