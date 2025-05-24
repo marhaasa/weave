@@ -33,7 +33,7 @@ brew install weave
    npm install
    ```
 
-## Running the TUI
+## Running weave
 
 ### If installed via Homebrew:
 ```bash
@@ -56,9 +56,9 @@ node weave.js
 
 - **Interactive Workspace Browser**: Navigate through your Fabric workspaces
 - **Notebook Management**: Run notebooks asynchronously or synchronously
-- **Job Monitoring**: Track job status and completion
+- **Job Monitoring**: Track job status and completion (notebooks only)
 - **Command History**: View previously executed commands
-- **Interactive Shell**: Access the native Fabric CLI when needed
+- **Interactive Shell**: Access the native Microsoft Fabric CLI when needed
 
 ## Usage
 
@@ -78,6 +78,8 @@ node weave.js
 - `r` - Refresh (where applicable)
 - `c` - Clear command history (in history view)
 
-## Requirements
+## Unreleased features
 
-Make sure you have the Microsoft Fabric CLI installed and properly authenticated before using this TUI.
+- Management of other types of resources
+- Moving resources between workspaces
+- and more...
