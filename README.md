@@ -7,7 +7,7 @@ An interactive Terminal User Interface (TUI) for [Microsoft Fabric CLI](https://
 ## Prerequisites
 
 - Node.js 16.0.0 or higher
-- Microsoft Fabric CLI (`fab`) installed and configured
+- [Microsoft Fabric CLI (`fab`)](https://microsoft.github.io/fabric-cli/) installed and configured (fab auth login)
 - Authenticated Fabric session
 
 ## Installation
