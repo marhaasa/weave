@@ -1,5 +1,7 @@
 # weave
 
+![weave](weave.png)
+
 An interactive Terminal User Interface (TUI) for [Microsoft Fabric CLI](https://microsoft.github.io/fabric-cli/) built with [Ink](https://github.com/vadimdemedes/ink).
 
 ## Prerequisites
