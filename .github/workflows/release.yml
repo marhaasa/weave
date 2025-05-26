@@ -111,9 +111,9 @@ jobs:
 
           # Update version, URL, and sha256 in-place using sed
           sed -i.bak \
-            -e "s|^  url \".*\"|  url \"https://github.com/${{ github.repository }}/releases/download/v${{ needs.create-release.outputs.version }}/weave-${{ needs.create-release.outputs.version }}.tar.gz\"|" \
-            -e "s|^  sha256 \".*\"|  sha256 \"${{ steps.calculate_sha.outputs.sha256 }}\"|" \
-            -e "s|^  version \".*\"|  version \"${{ needs.create-release.outputs.version }}\"|" \
+            -e "s|^    url \".*\"|    url \"https://github.com/${{ github.repository }}/releases/download/v${{ needs.create-release.outputs.version }}/weave-${{ needs.create-release.outputs.version }}.tar.gz\"|" \
+            -e "s|^    sha256 \".*\"|    sha256 \"${{ steps.calculate_sha.outputs.sha256 }}\"|" \
+            -e "s|^    version \".*\"|    version \"${{ needs.create-release.outputs.version }}\"|" \
             Formula/weave.rb
 
           rm Formula/weave.rb.bak
