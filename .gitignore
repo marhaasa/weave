@@ -1,6 +1,14 @@
 # Dependencies
 node_modules/
 
+# TypeScript build output
+dist/
+*.tsbuildinfo
+
+# TypeScript cache
+.tscache/
+tsconfig.tsbuildinfo
+
 # Environment variables
 .env
 

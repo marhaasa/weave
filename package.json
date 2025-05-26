@@ -2,14 +2,19 @@
   "name": "weave",
   "version": "0.1.5",
   "description": "An interactive TUI for Microsoft Fabric CLI",
-  "main": "weave.js",
+  "main": "dist/weave.js",
   "type": "module",
   "bin": {
     "weave": "./bin/weave"
   },
   "scripts": {
-    "start": "node weave.js",
-    "dev": "node weave.js"
+    "build": "tsc",
+    "start": "npm run build && node dist/weave.js",
+    "dev": "tsx weave.ts",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist",
+    "prebuild": "npm run clean",
+    "postinstall": "npm run build"
   },
   "dependencies": {
     "ink": "^4.4.1",
@@ -34,5 +39,17 @@
   "bugs": {
     "url": "https://github.com/marhaasa/weave/issues"
   },
-  "homepage": "https://github.com/marhaasa/weave#readme"
+  "homepage": "https://github.com/marhaasa/weave#readme",
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "@types/react": "^19.1.5",
+    "tsx": "^4.7.0",
+    "typescript": "^5.8.3"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ]
 }

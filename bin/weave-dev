@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Development wrapper that runs TypeScript directly
+
+# Get the directory of this script
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Run tsx with weave.ts
+exec npx tsx "$DIR/../weave.ts" "$@"

@@ -1,6 +1,7 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, ReactElement } from 'react';
 import { render, Box, Text, useInput, useApp } from 'ink';
-import { exec, spawn } from 'child_process';
+import type { Key } from 'ink';
+import { exec, spawn, ChildProcessWithoutNullStreams } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
@@ -10,6 +11,101 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const execAsync = promisify(exec);
+
+// ===== TYPE DEFINITIONS =====
+interface Config {
+  cacheTimeout: number;
+  maxRetries: number;
+  theme: string;
+}
+
+interface CommandResult {
+  success: boolean;
+  output: string;
+  error?: string;
+  command: string;
+  duration?: number;
+}
+
+interface HistoryEntry {
+  command: string;
+  timestamp: string;
+  success: boolean;
+  output?: string;
+}
+
+interface WorkspaceItem {
+  name: string;
+  isNotebook: boolean;
+}
+
+interface NotebookInfo {
+  name: string;
+  workspace: string;
+}
+
+interface JobInfo {
+  jobId: string;
+  workspace: string;
+  notebook: string;
+  startTime: number;
+}
+
+interface StatusInfo {
+  status: string;
+  startTime: string | null;
+  endTime: string | null;
+  jobType: string | null;
+}
+
+interface CachedData<T = any> {
+  data: T;
+  timestamp: number;
+}
+
+interface State {
+  currentView: string;
+  selectedOption: number;
+  output: string;
+  loading: boolean;
+  error: string;
+  workspaces: string[];
+  selectedWorkspace: number;
+  workspaceItems: (string | WorkspaceItem)[];
+  selectedWorkspaceItem: number;
+  inInteractiveMode: boolean;
+  commandHistory: HistoryEntry[];
+  loadingProgress: number;
+  config: Config | null;
+  activeJobs: JobInfo[];
+  currentJob: JobInfo | null;
+  selectedJobOption: number;
+  selectedNotebookAction: number;
+  currentNotebook: NotebookInfo | null;
+  completedJobs: Set<string>;
+  cache: Map<string, CachedData>;
+}
+
+interface ExecuteCommandOptions {
+  timeout?: number;
+  skipCache?: boolean;
+  silent?: boolean;
+  env?: Record<string, string>;
+}
+
+interface MenuOption {
+  label: string;
+  command?: string;
+  action?: string;
+  view?: string;
+}
+
+interface StatusConfig {
+  color: string;
+  icon: string;
+}
+
+type InputHandler = (input: string, key: Key) => void;
 
 // ===== CONSTANTS =====
 const VIEWS = {
@@ -21,7 +117,9 @@ const VIEWS = {
   COMMAND_HISTORY: 'command-history',
   JOB_MENU: 'job-menu',
   JOB_STATUS: 'job-status'
-};
+} as const;
+
+type ViewType = typeof VIEWS[keyof typeof VIEWS];
 
 const COLORS = {
   PRIMARY: 'cyan',
@@ -32,7 +130,7 @@ const COLORS = {
   HIGHLIGHT_BG: 'cyan',
   SUCCESS_BG: 'green',
   WARNING_BG: 'yellow'
-};
+} as const;
 
 const TIMEOUTS = {
   DEFAULT: 30000,
@@ -42,7 +140,7 @@ const TIMEOUTS = {
   PROGRESS_UPDATE: 200,
   RETRY_DELAY: 1000,
   LOADING_SCREEN: 1500
-};
+} as const;
 
 const LIMITS = {
   CACHE_TIMEOUT: 300000,
@@ -52,9 +150,9 @@ const LIMITS = {
   HISTORY_SIZE: 50,
   HISTORY_DISPLAY: 10,
   OUTPUT_PREVIEW: 200
-};
+} as const;
 
-const STATUS_CONFIG = {
+const STATUS_CONFIG: Record<string, StatusConfig> = {
   'Completed': { color: COLORS.SUCCESS, icon: '✅' },
   'Succeeded': { color: COLORS.SUCCESS, icon: '✅' },
   'Failed': { color: COLORS.ERROR, icon: '❌' },
@@ -66,49 +164,54 @@ const STATUS_CONFIG = {
 // ===== UI HELPERS =====
 const h = React.createElement;
 
-const createText = (props, text) => h(Text, props, text);
-const createBox = (props, children) => h(Box, props, children);
-const spacer = (key = 'spacer') => h(Box, { key, height: 1 });
+const createText = (props: any, text: string): ReactElement => h(Text, props, text);
+const createBox = (props: any, children: ReactElement[]): ReactElement => h(Box, props, children);
+const spacer = (key: string = 'spacer'): ReactElement => h(Box, { key, height: 1 });
 
-const createMenuItem = (label, index, selectedIndex, bgColor = COLORS.HIGHLIGHT_BG) =>
+const createMenuItem = (
+  label: string,
+  index: number,
+  selectedIndex: number,
+  bgColor: string = COLORS.HIGHLIGHT_BG
+): ReactElement =>
   createText({
     key: `menu-item-${index}`,
     color: index === selectedIndex ? 'black' : 'white',
     backgroundColor: index === selectedIndex ? bgColor : undefined
   }, label);
 
-const createErrorDisplay = (error, keyPrefix = '') => [
+const createErrorDisplay = (error: string, keyPrefix: string = ''): ReactElement[] => [
   createText({ key: `${keyPrefix}error-title`, color: COLORS.ERROR, bold: true }, '❌ Error:'),
   createText({ key: `${keyPrefix}error-text`, color: COLORS.ERROR }, error)
 ];
 
-const createLoadingDisplay = (message = 'Loading...', keyPrefix = '') =>
+const createLoadingDisplay = (message: string = 'Loading...', keyPrefix: string = ''): ReactElement =>
   createText({ key: `${keyPrefix}loading`, color: COLORS.WARNING }, `⏳ ${message}`);
 
 // ===== COMMAND BUILDERS =====
 const CommandBuilder = {
-  listWorkspaces: () => 'fab ls',
-  help: () => 'fab --help',
-  listWorkspace: (workspace) => `fab ls "${workspace}.Workspace"`,
+  listWorkspaces: (): string => 'fab ls',
+  help: (): string => 'fab --help',
+  listWorkspace: (workspace: string): string => `fab ls "${workspace}.Workspace"`,
 
   job: {
-    start: (workspace, notebook) =>
+    start: (workspace: string, notebook: string): string =>
       `fab job start ${workspace}.Workspace/${notebook}`,
-    runSync: (workspace, notebook) =>
+    runSync: (workspace: string, notebook: string): string =>
       `fab job run /${workspace}.Workspace/${notebook}`,
-    status: (workspace, notebook, jobId) =>
+    status: (workspace: string, notebook: string, jobId: string): string =>
       `fab job run-status /${workspace}.Workspace/${notebook} --id ${jobId}`,
-    list: (workspace, notebook) =>
+    list: (workspace: string, notebook: string): string =>
       `fab job run-list /${workspace}.Workspace/${notebook}`
   }
 };
 
 // ===== CONFIGURATION =====
-const CONFIG_DIR = path.join(os.homedir(), '.fabric-tui');
+const CONFIG_DIR = path.join(os.homedir(), '.weave');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const HISTORY_FILE = path.join(CONFIG_DIR, 'history.json');
 
-const loadConfig = async () => {
+const loadConfig = async (): Promise<Config> => {
   try {
     await fs.mkdir(CONFIG_DIR, { recursive: true });
     const data = await fs.readFile(CONFIG_FILE, 'utf8');
@@ -118,20 +221,26 @@ const loadConfig = async () => {
   }
 };
 
-const saveConfig = async (config) => {
+const saveConfig = async (config: Config): Promise<void> => {
   await fs.mkdir(CONFIG_DIR, { recursive: true });
   await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2));
 };
 
 // ===== PARSING UTILITIES =====
+interface ParseLinesFilters {
+  skipEmpty?: boolean;
+  skipHeaders?: boolean;
+  skipPatterns?: string[];
+}
+
 const ParsingUtils = {
-  cleanOutput: (output) => output
+  cleanOutput: (output: string): string => output
     .replace(/\x1b\[[0-9;]*m/g, '')
     .replace(/\r\n/g, '\n')
     .trim(),
 
-  parseLines: (output, filters = {}) => {
-    const defaultFilters = {
+  parseLines: (output: string, filters: ParseLinesFilters = {}): string[] => {
+    const defaultFilters: Required<ParseLinesFilters> = {
       skipEmpty: true,
       skipHeaders: true,
       skipPatterns: ['Listing', 'ID', '─']
@@ -149,7 +258,7 @@ const ParsingUtils = {
       });
   },
 
-  parseWorkspaces: (output) => {
+  parseWorkspaces: (output: string): string[] => {
     return ParsingUtils.parseLines(output)
       .map(line => {
         if (line.includes('.')) {
@@ -160,24 +269,24 @@ const ParsingUtils = {
       .filter(name => name && name.length > 0);
   },
 
-  parseWorkspaceItems: (output) => {
+  parseWorkspaceItems: (output: string): string[] => {
     return ParsingUtils.parseLines(output)
       .filter(item => item && item.length > 0);
   },
 
-  extractJobId: (output) => {
+  extractJobId: (output: string): string | null => {
     const match = output.match(/Job instance '([a-f0-9-]+)' created/i);
     return match ? match[1] : null;
   },
 
-  extractGuid: (text) => {
+  extractGuid: (text: string): string | null => {
     const match = text.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/);
     return match ? match[1] : null;
   },
 
-  parseJobStatus: (output) => {
+  parseJobStatus: (output: string): StatusInfo => {
     const lines = output.split('\n');
-    let statusInfo = {
+    let statusInfo: StatusInfo = {
       status: 'Unknown',
       startTime: null,
       endTime: null,
@@ -232,7 +341,7 @@ const ParsingUtils = {
     return statusInfo;
   },
 
-  formatDateTime: (dateTimeStr) => {
+  formatDateTime: (dateTimeStr: string | null): string => {
     if (!dateTimeStr || dateTimeStr === 'None') return 'N/A';
     try {
       const date = new Date(dateTimeStr);
@@ -258,14 +367,14 @@ const ParsingUtils = {
     }
   },
 
-  isNotebook: (item) => {
+  isNotebook: (item: string | WorkspaceItem): boolean => {
     return typeof item === 'string' ? item.endsWith('.Notebook') : item.isNotebook;
   }
 };
 
 // ===== HISTORY MANAGEMENT =====
 const HistoryManager = {
-  load: async () => {
+  load: async (): Promise<HistoryEntry[]> => {
     try {
       const data = await fs.readFile(HISTORY_FILE, 'utf8');
       return JSON.parse(data);
@@ -274,19 +383,19 @@ const HistoryManager = {
     }
   },
 
-  save: async (history) => {
+  save: async (history: HistoryEntry[]): Promise<void> => {
     await fs.mkdir(CONFIG_DIR, { recursive: true });
     await fs.writeFile(HISTORY_FILE, JSON.stringify(history.slice(0, LIMITS.HISTORY_SIZE), null, 2));
   },
 
-  createEntry: (command, result) => ({
+  createEntry: (command: string, result: CommandResult): HistoryEntry => ({
     command,
     timestamp: new Date().toISOString(),
     success: result.success,
     output: result.output?.substring(0, LIMITS.OUTPUT_PREVIEW)
   }),
 
-  formatTimestamp: (isoString) => {
+  formatTimestamp: (isoString: string): string => {
     try {
       const date = new Date(isoString);
       return date.toLocaleTimeString(undefined, {
@@ -302,7 +411,12 @@ const HistoryManager = {
 };
 
 // ===== NAVIGATION HELPER =====
-const handleNavigation = (key, currentIndex, maxIndex, setter) => {
+const handleNavigation = (
+  key: Key,
+  currentIndex: number,
+  maxIndex: number,
+  setter: (index: number) => void
+): void => {
   if (key.upArrow && currentIndex > 0) {
     setter(currentIndex - 1);
   } else if (key.downArrow && currentIndex < maxIndex) {
@@ -311,7 +425,7 @@ const handleNavigation = (key, currentIndex, maxIndex, setter) => {
 };
 
 // ===== STATE MANAGEMENT =====
-const createInitialState = () => ({
+const createInitialState = (): State => ({
   currentView: VIEWS.MAIN,
   selectedOption: 0,
   output: '',
@@ -334,8 +448,35 @@ const createInitialState = () => ({
   cache: new Map()
 });
 
-const useFabricState = () => {
-  const [state, setState] = useState(createInitialState());
+interface Actions {
+  updateState: (updates: Partial<State>) => void;
+  resetState: () => void;
+  setCurrentView: (view: ViewType) => void;
+  setSelectedOption: (option: number) => void;
+  setOutput: (output: string) => void;
+  setLoading: (loading: boolean) => void;
+  setError: (error: string) => void;
+  setWorkspaces: (workspaces: string[]) => void;
+  setSelectedWorkspace: (index: number) => void;
+  setWorkspaceItems: (items: (string | WorkspaceItem)[]) => void;
+  setSelectedWorkspaceItem: (index: number) => void;
+  setInInteractiveMode: (mode: boolean) => void;
+  setLoadingProgress: (progress: number | ((prev: number) => number)) => void;
+  setConfig: (config: Config) => void;
+  setCurrentJob: (job: JobInfo | null) => void;
+  setSelectedJobOption: (option: number) => void;
+  setSelectedNotebookAction: (action: number) => void;
+  setCurrentNotebook: (notebook: NotebookInfo | null) => void;
+  addToHistory: (command: string, result: CommandResult) => Promise<void>;
+  getCachedData: <T = any>(key: string) => T | null;
+  setCachedData: <T = any>(key: string, data: T) => void;
+  addActiveJob: (jobId: string, workspace: string, notebook: string) => void;
+  markJobCompleted: (workspace: string, notebook: string) => void;
+  setCommandHistory: (history: HistoryEntry[]) => void;
+}
+
+const useWeaveState = (): { state: State; actions: Actions } => {
+  const [state, setState] = useState<State>(createInitialState());
 
   useEffect(() => {
     const init = async () => {
@@ -345,8 +486,8 @@ const useFabricState = () => {
     init();
   }, []);
 
-  const actions = useMemo(() => ({
-    updateState: (updates) => setState(prev => ({ ...prev, ...updates })),
+  const actions = useMemo<Actions>(() => ({
+    updateState: (updates: Partial<State>) => setState(prev => ({ ...prev, ...updates })),
 
     resetState: () => setState(prev => ({
       ...createInitialState(),
@@ -355,24 +496,27 @@ const useFabricState = () => {
       cache: prev.cache
     })),
 
-    setCurrentView: (view) => setState(prev => ({ ...prev, currentView: view })),
-    setSelectedOption: (option) => setState(prev => ({ ...prev, selectedOption: option })),
-    setOutput: (output) => setState(prev => ({ ...prev, output })),
-    setLoading: (loading) => setState(prev => ({ ...prev, loading })),
-    setError: (error) => setState(prev => ({ ...prev, error })),
-    setWorkspaces: (workspaces) => setState(prev => ({ ...prev, workspaces })),
-    setSelectedWorkspace: (index) => setState(prev => ({ ...prev, selectedWorkspace: index })),
-    setWorkspaceItems: (items) => setState(prev => ({ ...prev, workspaceItems: items })),
-    setSelectedWorkspaceItem: (index) => setState(prev => ({ ...prev, selectedWorkspaceItem: index })),
-    setInInteractiveMode: (mode) => setState(prev => ({ ...prev, inInteractiveMode: mode })),
-    setLoadingProgress: (progress) => setState(prev => ({ ...prev, loadingProgress: progress })),
-    setConfig: (config) => setState(prev => ({ ...prev, config })),
-    setCurrentJob: (job) => setState(prev => ({ ...prev, currentJob: job })),
-    setSelectedJobOption: (option) => setState(prev => ({ ...prev, selectedJobOption: option })),
-    setSelectedNotebookAction: (action) => setState(prev => ({ ...prev, selectedNotebookAction: action })),
-    setCurrentNotebook: (notebook) => setState(prev => ({ ...prev, currentNotebook: notebook })),
+    setCurrentView: (view: ViewType) => setState(prev => ({ ...prev, currentView: view })),
+    setSelectedOption: (option: number) => setState(prev => ({ ...prev, selectedOption: option })),
+    setOutput: (output: string) => setState(prev => ({ ...prev, output })),
+    setLoading: (loading: boolean) => setState(prev => ({ ...prev, loading })),
+    setError: (error: string) => setState(prev => ({ ...prev, error })),
+    setWorkspaces: (workspaces: string[]) => setState(prev => ({ ...prev, workspaces })),
+    setSelectedWorkspace: (index: number) => setState(prev => ({ ...prev, selectedWorkspace: index })),
+    setWorkspaceItems: (items: (string | WorkspaceItem)[]) => setState(prev => ({ ...prev, workspaceItems: items })),
+    setSelectedWorkspaceItem: (index: number) => setState(prev => ({ ...prev, selectedWorkspaceItem: index })),
+    setInInteractiveMode: (mode: boolean) => setState(prev => ({ ...prev, inInteractiveMode: mode })),
+    setLoadingProgress: (progress: number | ((prev: number) => number)) => setState(prev => ({
+      ...prev,
+      loadingProgress: typeof progress === 'function' ? progress(prev.loadingProgress) : progress
+    })),
+    setConfig: (config: Config) => setState(prev => ({ ...prev, config })),
+    setCurrentJob: (job: JobInfo | null) => setState(prev => ({ ...prev, currentJob: job })),
+    setSelectedJobOption: (option: number) => setState(prev => ({ ...prev, selectedJobOption: option })),
+    setSelectedNotebookAction: (action: number) => setState(prev => ({ ...prev, selectedNotebookAction: action })),
+    setCurrentNotebook: (notebook: NotebookInfo | null) => setState(prev => ({ ...prev, currentNotebook: notebook })),
 
-    addToHistory: async (command, result) => {
+    addToHistory: async (command: string, result: CommandResult) => {
       const entry = HistoryManager.createEntry(command, result);
       setState(prev => {
         const newHistory = [entry, ...prev.commandHistory.slice(0, LIMITS.HISTORY_SIZE - 1)];
@@ -381,16 +525,16 @@ const useFabricState = () => {
       });
     },
 
-    getCachedData: (key) => {
+    getCachedData: <T = any>(key: string): T | null => {
       const cached = state.cache.get(key);
       const timeout = state.config?.cacheTimeout || LIMITS.CACHE_TIMEOUT;
       if (cached && Date.now() - cached.timestamp < timeout) {
-        return cached.data;
+        return cached.data as T;
       }
       return null;
     },
 
-    setCachedData: (key, data) => {
+    setCachedData: <T = any>(key: string, data: T) => {
       setState(prev => {
         const newCache = new Map(prev.cache);
         newCache.set(key, { data, timestamp: Date.now() });
@@ -398,14 +542,14 @@ const useFabricState = () => {
       });
     },
 
-    addActiveJob: (jobId, workspace, notebook) => {
+    addActiveJob: (jobId: string, workspace: string, notebook: string) => {
       setState(prev => ({
         ...prev,
         activeJobs: [...prev.activeJobs, { jobId, workspace, notebook, startTime: Date.now() }]
       }));
     },
 
-    markJobCompleted: (workspace, notebook) => {
+    markJobCompleted: (workspace: string, notebook: string) => {
       const jobKey = `${workspace}/${notebook}`;
       setState(prev => ({
         ...prev,
@@ -413,19 +557,22 @@ const useFabricState = () => {
       }));
     },
 
-    setCommandHistory: (history) => setState(prev => ({ ...prev, commandHistory: history }))
+    setCommandHistory: (history: HistoryEntry[]) => setState(prev => ({ ...prev, commandHistory: history }))
   }), [state.cache, state.config]);
 
   return { state, actions };
 };
 
 // ===== COMMAND EXECUTION =====
-const useCommandExecution = (actions, config) => {
-  const executeCommand = useCallback(async (command, options = {}) => {
+const useCommandExecution = (actions: Actions, config: Config | null) => {
+  const executeCommand = useCallback(async (
+    command: string,
+    options: ExecuteCommandOptions = {}
+  ): Promise<CommandResult> => {
     const cacheKey = `${command}-${JSON.stringify(options)}`;
 
     if (!options.skipCache) {
-      const cachedResult = actions.getCachedData(cacheKey);
+      const cachedResult = actions.getCachedData<CommandResult>(cacheKey);
       if (cachedResult) {
         if (!options.silent) {
           actions.setOutput(cachedResult.output);
@@ -441,7 +588,7 @@ const useCommandExecution = (actions, config) => {
     actions.setError('');
 
     const progressInterval = setInterval(() => {
-      actions.setLoadingProgress(prev => Math.min(prev + LIMITS.PROGRESS_INCREMENT, LIMITS.PROGRESS_MAX));
+      actions.setLoadingProgress((prev: number) => Math.min(prev + LIMITS.PROGRESS_INCREMENT, LIMITS.PROGRESS_MAX));
     }, TIMEOUTS.PROGRESS_UPDATE);
 
     try {
@@ -455,7 +602,7 @@ const useCommandExecution = (actions, config) => {
 
       clearTimeout(timeoutId);
 
-      const result = {
+      const result: CommandResult = {
         success: !stderr?.trim(),
         output: ParsingUtils.cleanOutput(stdout),
         error: stderr?.trim(),
@@ -470,7 +617,7 @@ const useCommandExecution = (actions, config) => {
         if (result.success) {
           actions.setOutput(result.output);
         } else {
-          actions.setError(result.error);
+          actions.setError(result.error || '');
         }
       }
 
@@ -478,12 +625,12 @@ const useCommandExecution = (actions, config) => {
       await actions.addToHistory(command, result);
 
       return result;
-    } catch (err) {
+    } catch (err: any) {
       const error = err.name === 'AbortError'
         ? 'Command timed out. Try again or check your connection.'
         : `Error executing command: ${err.message}`;
 
-      const result = { success: false, error, command };
+      const result: CommandResult = { success: false, error, command, output: '' };
       if (!options.silent) {
         actions.setError(error);
       }
@@ -498,9 +645,13 @@ const useCommandExecution = (actions, config) => {
     }
   }, [actions]);
 
-  const executeCommandWithRetry = useCallback(async (command, options = {}, maxRetries = null) => {
+  const executeCommandWithRetry = useCallback(async (
+    command: string,
+    options: ExecuteCommandOptions = {},
+    maxRetries: number | null = null
+  ): Promise<CommandResult> => {
     const retries = maxRetries ?? config?.maxRetries ?? LIMITS.MAX_RETRIES;
-    let lastError;
+    let lastError: string = '';
 
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
@@ -510,13 +661,13 @@ const useCommandExecution = (actions, config) => {
         });
 
         if (result.success) return result;
-        lastError = result.error;
+        lastError = result.error || '';
 
         if (attempt < retries) {
           actions.setError(`Attempt ${attempt + 1} failed. Retrying...`);
           await new Promise(resolve => setTimeout(resolve, TIMEOUTS.RETRY_DELAY * (attempt + 1)));
         }
-      } catch (err) {
+      } catch (err: any) {
         lastError = err.message;
         if (attempt < retries) {
           await new Promise(resolve => setTimeout(resolve, TIMEOUTS.RETRY_DELAY * (attempt + 1)));
@@ -525,17 +676,20 @@ const useCommandExecution = (actions, config) => {
     }
 
     actions.setError(`Command failed after ${retries + 1} attempts: ${lastError}`);
-    return { success: false, error: lastError };
+    return { success: false, error: lastError, command, output: '' };
   }, [executeCommand, actions, config]);
 
-  const executeCommandWithStatusUpdates = useCallback(async (command, options = {}) => {
+  const executeCommandWithStatusUpdates = useCallback(async (
+    command: string,
+    options: ExecuteCommandOptions = {}
+  ): Promise<CommandResult> => {
     actions.setLoading(true);
     actions.setError('');
 
     const startTime = Date.now();
 
     return new Promise((resolve, reject) => {
-      const child = spawn('sh', ['-c', command], {
+      const child: ChildProcessWithoutNullStreams = spawn('sh', ['-c', command], {
         env: { ...process.env, FORCE_COLOR: '0', ...options.env }
       });
 
@@ -550,7 +704,7 @@ const useCommandExecution = (actions, config) => {
         actions.setOutput(`🔄 Job is running${dots} (${elapsed}s elapsed)`);
       }, 1000);
 
-      child.stdout.on('data', (data) => {
+      child.stdout.on('data', (data: Buffer) => {
         const chunk = data.toString();
         output += chunk;
 
@@ -566,16 +720,16 @@ const useCommandExecution = (actions, config) => {
         }
       });
 
-      child.stderr.on('data', (data) => {
+      child.stderr.on('data', (data: Buffer) => {
         error += data.toString();
       });
 
-      child.on('close', async (code) => {
+      child.on('close', async (code: number | null) => {
         clearInterval(statusInterval);
         actions.setLoading(false);
 
         const duration = Math.floor((Date.now() - startTime) / 1000);
-        const result = {
+        const result: CommandResult = {
           success: code === 0 && !error.trim(),
           output: ParsingUtils.cleanOutput(output),
           error: error.trim(),
@@ -592,7 +746,7 @@ const useCommandExecution = (actions, config) => {
         }
       });
 
-      child.on('error', (err) => {
+      child.on('error', (err: Error) => {
         clearInterval(statusInterval);
         actions.setLoading(false);
         actions.setError(`Error executing command: ${err.message}`);
@@ -615,15 +769,29 @@ const useCommandExecution = (actions, config) => {
 };
 
 // ===== INPUT HANDLERS =====
-const createInputHandlers = (state, actions, handlers) => ({
-  [VIEWS.MAIN]: (input, key) => {
+interface Handlers {
+  handleMenuSelection: () => Promise<void>;
+  handleWorkspaceSelection: () => Promise<void>;
+  handleWorkspaceItemSelection: () => Promise<void>;
+  handleNotebookActionSelection: () => Promise<void>;
+  handleJobMenuSelection: () => Promise<void>;
+  checkJobStatus: () => Promise<void>;
+  refreshWorkspaces: () => Promise<void>;
+}
+
+const createInputHandlers = (
+  state: State,
+  actions: Actions,
+  handlers: Handlers
+): Record<string, InputHandler> => ({
+  [VIEWS.MAIN]: (input: string, key: Key) => {
     handleNavigation(key, state.selectedOption, 3, actions.setSelectedOption);
 
     if (key.return) handlers.handleMenuSelection();
     else if (input === 'q' || key.escape) process.exit(0);
   },
 
-  [VIEWS.WORKSPACES]: (input, key) => {
+  [VIEWS.WORKSPACES]: (input: string, key: Key) => {
     const maxSelection = state.workspaces.length;
     handleNavigation(key, state.selectedWorkspace, maxSelection, actions.setSelectedWorkspace);
 
@@ -642,7 +810,7 @@ const createInputHandlers = (state, actions, handlers) => ({
     }
   },
 
-  [VIEWS.WORKSPACE_ITEMS]: (input, key) => {
+  [VIEWS.WORKSPACE_ITEMS]: (input: string, key: Key) => {
     if (key.escape || input === 'q') {
       actions.updateState({
         currentView: VIEWS.WORKSPACES,
@@ -668,7 +836,7 @@ const createInputHandlers = (state, actions, handlers) => ({
     }
   },
 
-  [VIEWS.NOTEBOOK_ACTIONS]: (input, key) => {
+  [VIEWS.NOTEBOOK_ACTIONS]: (input: string, key: Key) => {
     handleNavigation(key, state.selectedNotebookAction, 3, actions.setSelectedNotebookAction);
 
     if (key.return) handlers.handleNotebookActionSelection();
@@ -681,7 +849,7 @@ const createInputHandlers = (state, actions, handlers) => ({
     }
   },
 
-  [VIEWS.JOB_MENU]: (input, key) => {
+  [VIEWS.JOB_MENU]: (input: string, key: Key) => {
     handleNavigation(key, state.selectedJobOption, 2, actions.setSelectedJobOption);
 
     if (key.return) handlers.handleJobMenuSelection();
@@ -694,7 +862,7 @@ const createInputHandlers = (state, actions, handlers) => ({
     }
   },
 
-  [VIEWS.JOB_STATUS]: (input, key) => {
+  [VIEWS.JOB_STATUS]: (input: string, key: Key) => {
     if (key.return || key.escape || input === 'q') {
       actions.setCurrentView(VIEWS.JOB_MENU);
     } else if (input === 'r') {
@@ -702,7 +870,7 @@ const createInputHandlers = (state, actions, handlers) => ({
     }
   },
 
-  [VIEWS.COMMAND_HISTORY]: (input, key) => {
+  [VIEWS.COMMAND_HISTORY]: (input: string, key: Key) => {
     if (key.escape || input === 'q') {
       actions.setCurrentView(VIEWS.MAIN);
     } else if (input === 'c') {
@@ -711,7 +879,7 @@ const createInputHandlers = (state, actions, handlers) => ({
     }
   },
 
-  [VIEWS.OUTPUT]: (input, key) => {
+  [VIEWS.OUTPUT]: (input: string, key: Key) => {
     if (key.escape || input === 'q') {
       if (state.currentNotebook) {
         actions.setCurrentView(VIEWS.NOTEBOOK_ACTIONS);
@@ -722,7 +890,7 @@ const createInputHandlers = (state, actions, handlers) => ({
     }
   },
 
-  default: (input, key) => {
+  default: (input: string, key: Key) => {
     if (key.escape || input === 'q') {
       actions.setCurrentView(VIEWS.MAIN);
       actions.resetState();
@@ -731,9 +899,9 @@ const createInputHandlers = (state, actions, handlers) => ({
 });
 
 // ===== UI COMPONENTS =====
-const AnimatedWeaveTitle = React.memo(() => {
-  const [frame, setFrame] = useState(0);
-  const [direction, setDirection] = useState(1);
+const AnimatedWeaveTitle: React.FC = React.memo(() => {
+  const [frame, setFrame] = useState<number>(0);
+  const [direction, setDirection] = useState<number>(1);
 
   useEffect(() => {
     const patterns = [
@@ -783,7 +951,11 @@ const AnimatedWeaveTitle = React.memo(() => {
   return createText({ bold: true, color: COLORS.PRIMARY, fontSize: 24 }, patterns[frame]);
 });
 
-const MainMenu = React.memo(({ selectedOption }) => {
+interface MainMenuProps {
+  selectedOption: number;
+}
+
+const MainMenu: React.FC<MainMenuProps> = React.memo(({ selectedOption }) => {
   const menuOptions = useMemo(() => [
     { label: 'Workspaces', command: CommandBuilder.listWorkspaces(), view: VIEWS.WORKSPACES },
     { label: 'Manual Interactive Shell', action: 'interactive' },
@@ -800,14 +972,34 @@ const MainMenu = React.memo(({ selectedOption }) => {
   ]);
 });
 
-const LoadingOrError = ({ loading, error, loadingMessage = 'Loading...' }) => {
+interface LoadingOrErrorProps {
+  loading: boolean;
+  error: string;
+  loadingMessage?: string;
+}
+
+const LoadingOrError: React.FC<LoadingOrErrorProps> = ({ loading, error, loadingMessage = 'Loading...' }) => {
   if (loading) return createLoadingDisplay(loadingMessage);
   if (error) return createBox({ flexDirection: 'column' }, createErrorDisplay(error));
   return null;
 };
 
-const WorkspacesList = React.memo(({ workspaces, selectedWorkspace, loading, error, loadingProgress }) => {
-  const elements = [
+interface WorkspacesListProps {
+  workspaces: string[];
+  selectedWorkspace: number;
+  loading: boolean;
+  error: string;
+  loadingProgress: number;
+}
+
+const WorkspacesList: React.FC<WorkspacesListProps> = React.memo(({
+  workspaces,
+  selectedWorkspace,
+  loading,
+  error,
+  loadingProgress
+}) => {
+  const elements: ReactElement[] = [
     createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, 'Workspaces'),
     spacer()
   ];
@@ -845,8 +1037,22 @@ const WorkspacesList = React.memo(({ workspaces, selectedWorkspace, loading, err
   return createBox({ flexDirection: 'column', padding: 1 }, elements);
 });
 
-const WorkspaceItems = React.memo(({ items, selectedItem, workspaceName, loading, error }) => {
-  const elements = [
+interface WorkspaceItemsProps {
+  items: (string | WorkspaceItem)[];
+  selectedItem: number;
+  workspaceName: string;
+  loading: boolean;
+  error: string;
+}
+
+const WorkspaceItems: React.FC<WorkspaceItemsProps> = React.memo(({
+  items,
+  selectedItem,
+  workspaceName,
+  loading,
+  error
+}) => {
+  const elements: ReactElement[] = [
     createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, 'Workspace Items'),
     spacer()
   ];
@@ -901,8 +1107,12 @@ const WorkspaceItems = React.memo(({ items, selectedItem, workspaceName, loading
   return createBox({ flexDirection: 'column', padding: 1 }, elements);
 });
 
-const CommandHistory = React.memo(({ history }) => {
-  const elements = [
+interface CommandHistoryProps {
+  history: HistoryEntry[];
+}
+
+const CommandHistory: React.FC<CommandHistoryProps> = React.memo(({ history }) => {
+  const elements: ReactElement[] = [
     createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, '📜 Command History'),
     createText({ key: 'instructions', color: COLORS.SECONDARY },
       "Press 'c' to clear history, 'q' to return to main menu"
@@ -925,11 +1135,11 @@ const CommandHistory = React.memo(({ history }) => {
             key: 'cmd',
             color: entry.success ? COLORS.SUCCESS : COLORS.ERROR
           }, `$ ${entry.command}`),
-          entry.output && createText({
+          ...(entry.output ? [createText({
             key: 'output',
             color: COLORS.SECONDARY,
             dimColor: true
-          }, entry.output.substring(0, 80) + (entry.output.length > 80 ? '...' : ''))
+          }, entry.output.substring(0, 80) + (entry.output.length > 80 ? '...' : ''))] : [])
         ])
       );
     });
@@ -946,15 +1156,31 @@ const CommandHistory = React.memo(({ history }) => {
   return createBox({ flexDirection: 'column', padding: 1 }, elements);
 });
 
-const NotebookActionsMenu = React.memo(({ notebook, workspace, selectedOption, completedJobs, activeJobs, currentJob }) => {
+interface NotebookActionsMenuProps {
+  notebook: string;
+  workspace: string;
+  selectedOption: number;
+  completedJobs: Set<string>;
+  activeJobs: JobInfo[];
+  currentJob: JobInfo | null;
+}
+
+const NotebookActionsMenu: React.FC<NotebookActionsMenuProps> = React.memo(({
+  notebook,
+  workspace,
+  selectedOption,
+  completedJobs,
+  activeJobs,
+  currentJob
+}) => {
   const jobKey = `${workspace}/${notebook}`;
   const hasJobCompleted = completedJobs && completedJobs.has(jobKey);
 
-  const elements = [
+  const elements: ReactElement[] = [
     createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, 'Notebook Actions'),
     spacer('spacer1'),
     createText({ key: 'notebook-info', color: COLORS.PRIMARY }, `📓 ${notebook}`),
-    hasJobCompleted && createText({ key: 'job-status', color: COLORS.SUCCESS }, `✅ Job has been run and completed`),
+    ...(hasJobCompleted ? [createText({ key: 'job-status', color: COLORS.SUCCESS }, `✅ Job has been run and completed`)] : []),
     spacer('spacer2'),
     createText({ key: 'menu-title', color: COLORS.PRIMARY, bold: true }, 'What would you like to do?'),
     spacer('spacer3')
@@ -978,8 +1204,13 @@ const NotebookActionsMenu = React.memo(({ notebook, workspace, selectedOption, c
   return createBox({ flexDirection: 'column', padding: 1 }, elements.filter(Boolean));
 });
 
-const JobMenu = React.memo(({ job, selectedOption }) => {
-  const elements = [
+interface JobMenuProps {
+  job: JobInfo;
+  selectedOption: number;
+}
+
+const JobMenu: React.FC<JobMenuProps> = React.memo(({ job, selectedOption }) => {
+  const elements: ReactElement[] = [
     createText({ key: 'title', bold: true, color: COLORS.SUCCESS }, '✅ Job Started Successfully!'),
     spacer('spacer1'),
     createText({ key: 'job-info', color: COLORS.PRIMARY }, `📓 Notebook: ${job.notebook}`),
@@ -1010,8 +1241,15 @@ const JobMenu = React.memo(({ job, selectedOption }) => {
   return createBox({ flexDirection: 'column', padding: 1 }, elements);
 });
 
-const JobStatusView = React.memo(({ output, jobInfo, loading, error }) => {
-  const elements = [
+interface JobStatusViewProps {
+  output: string;
+  jobInfo: JobInfo;
+  loading: boolean;
+  error: string;
+}
+
+const JobStatusView: React.FC<JobStatusViewProps> = React.memo(({ output, jobInfo, loading, error }) => {
+  const elements: ReactElement[] = [
     createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, '📊 Job Status'),
     createText({ key: 'job-info', color: COLORS.SECONDARY }, `Notebook: ${jobInfo.notebook}`),
     spacer()
@@ -1062,8 +1300,24 @@ const JobStatusView = React.memo(({ output, jobInfo, loading, error }) => {
   return createBox({ flexDirection: 'column', padding: 1 }, elements);
 });
 
-const OutputView = React.memo(({ output, error, loading, title, activeJobs, currentNotebook }) => {
-  const elements = [];
+interface OutputViewProps {
+  output: string;
+  error: string;
+  loading: boolean;
+  title?: string;
+  activeJobs: JobInfo[];
+  currentNotebook: NotebookInfo | null;
+}
+
+const OutputView: React.FC<OutputViewProps> = React.memo(({
+  output,
+  error,
+  loading,
+  title,
+  activeJobs,
+  currentNotebook
+}) => {
+  const elements: ReactElement[] = [];
 
   if (error) {
     elements.push(...createErrorDisplay(error));
@@ -1073,7 +1327,7 @@ const OutputView = React.memo(({ output, error, loading, title, activeJobs, curr
     const lines = output.split('\n');
     lines.forEach((line, index) => {
       if (line.trim()) {
-        let color = COLORS.PRIMARY;
+        let color: string = COLORS.PRIMARY;
         let bold = false;
 
         if (line.includes('🔄') || line.includes('Starting')) {
@@ -1105,18 +1359,21 @@ const OutputView = React.memo(({ output, error, loading, title, activeJobs, curr
   return createBox({ flexDirection: 'column', padding: 1, height: '100%', overflowY: 'hidden' }, elements);
 });
 
-const LoadingScreen = React.memo(() => {
-  const [version, setVersion] = useState('v0.1.3');
+const LoadingScreen: React.FC = React.memo(() => {
+  const [version, setVersion] = useState<string>('v0.1.3');
 
   useEffect(() => {
     const loadVersion = async () => {
       try {
-        const packageJson = JSON.parse(await fs.readFile(path.join(__dirname, 'package.json'), 'utf8'));
+        // Go up one level from dist/ to project root
+        const packageJsonPath = path.resolve(__dirname, '../package.json');
+        const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf8'));
         setVersion(`v${packageJson.version}`);
       } catch (error) {
         console.error('Failed to load version from package.json:', error);
       }
     };
+
     loadVersion();
   }, []);
 
@@ -1140,11 +1397,11 @@ const LoadingScreen = React.memo(() => {
 });
 
 // ===== MAIN APPLICATION =====
-const FabricCLI = () => {
-  const { state, actions } = useFabricState();
+const weave: React.FC = () => {
+  const { state, actions } = useWeaveState();
   const { executeCommand, executeCommandWithRetry, executeCommandWithStatusUpdates } = useCommandExecution(actions, state.config);
   const { exit } = useApp();
-  const [showLoadingScreen, setShowLoadingScreen] = useState(true);
+  const [showLoadingScreen, setShowLoadingScreen] = useState<boolean>(true);
 
   useEffect(() => {
     const timer = setTimeout(() => setShowLoadingScreen(false), TIMEOUTS.LOADING_SCREEN);
@@ -1177,7 +1434,7 @@ const FabricCLI = () => {
 
       child.on('close', handleExit);
       child.on('exit', handleExit);
-      child.on('error', (err) => {
+      child.on('error', (err: Error) => {
         console.error('Error starting interactive shell:', err.message);
         console.log('Run "weave" (if installed via homebrew), "npm start" or "node weave.js" to restart the TUI.');
         process.exit(1);
@@ -1185,7 +1442,7 @@ const FabricCLI = () => {
     }, 100);
   }, [exit]);
 
-  const menuOptions = [
+  const menuOptions: MenuOption[] = [
     { label: 'Workspaces', command: CommandBuilder.listWorkspaces(), view: VIEWS.WORKSPACES },
     { label: 'Manual Interactive Shell', action: 'interactive' },
     { label: 'Command History', action: 'history', view: VIEWS.COMMAND_HISTORY },
@@ -1210,13 +1467,13 @@ const FabricCLI = () => {
       return;
     }
 
-    actions.setCurrentView(selected.view || VIEWS.OUTPUT);
+    actions.setCurrentView((selected.view as ViewType) || VIEWS.OUTPUT);
     actions.setWorkspaces([]);
     actions.setSelectedWorkspace(0);
 
     const result = selected.command === CommandBuilder.listWorkspaces()
-      ? await executeCommandWithRetry(selected.command, { timeout: TIMEOUTS.WORKSPACE_LOAD })
-      : await executeCommand(selected.command);
+      ? await executeCommandWithRetry(selected.command!, { timeout: TIMEOUTS.WORKSPACE_LOAD })
+      : await executeCommand(selected.command!);
 
     if (result.success && selected.command === CommandBuilder.listWorkspaces()) {
       const workspaceList = ParsingUtils.parseWorkspaces(result.output);
@@ -1270,9 +1527,9 @@ const FabricCLI = () => {
   const handleNotebookActionSelection = useCallback(async () => {
     if (!state.currentNotebook) return;
 
-    const actionHandlers = {
+    const actionHandlers: Record<number, () => Promise<void> | void> = {
       0: async () => { // Run in background
-        const command = CommandBuilder.job.start(state.currentNotebook.workspace, state.currentNotebook.name);
+        const command = CommandBuilder.job.start(state.currentNotebook!.workspace, state.currentNotebook!.name);
         actions.setCurrentView(VIEWS.OUTPUT);
         actions.setOutput('🚀 Starting job in background...');
 
@@ -1281,7 +1538,7 @@ const FabricCLI = () => {
         if (result.success) {
           const jobId = ParsingUtils.extractJobId(result.output);
           if (jobId) {
-            actions.addActiveJob(jobId, state.currentNotebook.workspace, state.currentNotebook.name);
+            actions.addActiveJob(jobId, state.currentNotebook!.workspace, state.currentNotebook!.name);
             actions.setOutput(
               `✅ Job started successfully in background\n\n` +
               `📍 Job ID: ${jobId}\n\n` +
@@ -1297,7 +1554,7 @@ const FabricCLI = () => {
       },
 
       1: async () => { // Run synchronously
-        const command = CommandBuilder.job.runSync(state.currentNotebook.workspace, state.currentNotebook.name);
+        const command = CommandBuilder.job.runSync(state.currentNotebook!.workspace, state.currentNotebook!.name);
         actions.setCurrentView(VIEWS.OUTPUT);
         actions.setOutput('🔄 Starting synchronous job execution...\n');
 
@@ -1305,20 +1562,20 @@ const FabricCLI = () => {
           const result = await executeCommandWithStatusUpdates(command, { timeout: TIMEOUTS.JOB_RUN });
 
           if (result.success) {
-            actions.markJobCompleted(state.currentNotebook.workspace, state.currentNotebook.name);
+            actions.markJobCompleted(state.currentNotebook!.workspace, state.currentNotebook!.name);
             actions.setOutput(
               `✅ Job completed successfully (${result.duration}s)\n\n` +
               `💡 Press 'q' or ESC to return to notebook actions menu`
             );
           }
-        } catch (error) {
-          actions.markJobCompleted(state.currentNotebook.workspace, state.currentNotebook.name);
+        } catch (error: any) {
+          actions.markJobCompleted(state.currentNotebook!.workspace, state.currentNotebook!.name);
           actions.setOutput(`❌ Job failed: ${error.message}\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
         }
       },
 
       2: async () => { // View last job details
-        const listCommand = CommandBuilder.job.list(state.currentNotebook.workspace, state.currentNotebook.name);
+        const listCommand = CommandBuilder.job.list(state.currentNotebook!.workspace, state.currentNotebook!.name);
         actions.setCurrentView(VIEWS.OUTPUT);
         actions.setOutput('🔍 Getting job details...');
 
@@ -1327,7 +1584,7 @@ const FabricCLI = () => {
           const jobId = ParsingUtils.extractGuid(listResult.output);
 
           if (jobId) {
-            const statusCommand = CommandBuilder.job.status(state.currentNotebook.workspace, state.currentNotebook.name, jobId);
+            const statusCommand = CommandBuilder.job.status(state.currentNotebook!.workspace, state.currentNotebook!.name, jobId);
             const statusResult = await executeCommand(statusCommand, { skipCache: true });
 
             if (statusResult.success) {
@@ -1387,14 +1644,14 @@ const FabricCLI = () => {
   const handleJobMenuSelection = useCallback(async () => {
     if (!state.currentJob) return;
 
-    const actionHandlers = {
+    const actionHandlers: Record<number, () => Promise<void> | void> = {
       0: async () => { // Check status
         actions.setCurrentView(VIEWS.JOB_STATUS);
         await checkJobStatus();
       },
 
       1: async () => { // Run synchronously
-        const command = CommandBuilder.job.runSync(state.currentJob.workspace, state.currentJob.notebook);
+        const command = CommandBuilder.job.runSync(state.currentJob!.workspace, state.currentJob!.notebook);
         actions.setCurrentView(VIEWS.OUTPUT);
         actions.setOutput('🔄 Starting synchronous job execution...\n');
 
@@ -1406,7 +1663,7 @@ const FabricCLI = () => {
               `💡 Press 'q' or ESC to return to main menu`
             );
           }
-        } catch (error) {
+        } catch (error: any) {
           actions.setOutput(`❌ Job failed: ${error.message}\n\n💡 Press 'q' or ESC to return to main menu`);
         }
       },
@@ -1435,7 +1692,7 @@ const FabricCLI = () => {
     }
   }, [executeCommandWithRetry, actions]);
 
-  const handlers = useMemo(() => ({
+  const handlers: Handlers = useMemo(() => ({
     handleMenuSelection,
     handleWorkspaceSelection,
     handleWorkspaceItemSelection,
@@ -1456,7 +1713,7 @@ const FabricCLI = () => {
   const inputHandlers = createInputHandlers(state, actions, handlers);
   const currentInputHandler = inputHandlers[state.currentView] || inputHandlers.default;
 
-  useInput((input, key) => {
+  useInput((input: string, key: Key) => {
     if (state.inInteractiveMode) return;
     currentInputHandler(input, key);
     if (input === 'q' && state.currentView === VIEWS.MAIN) exit();
@@ -1465,8 +1722,8 @@ const FabricCLI = () => {
   if (state.inInteractiveMode) return createBox({}, []);
   if (showLoadingScreen) return h(LoadingScreen);
 
-  const viewComponents = {
-    [VIEWS.MAIN]: () => h(MainMenu, { selectedOption: state.selectedOption, menuOptions }),
+  const viewComponents: Record<string, () => ReactElement> = {
+    [VIEWS.MAIN]: () => h(MainMenu, { selectedOption: state.selectedOption }),
     [VIEWS.WORKSPACES]: () => h(WorkspacesList, {
       workspaces: state.workspaces,
       selectedWorkspace: state.selectedWorkspace,
@@ -1483,20 +1740,20 @@ const FabricCLI = () => {
     }),
     [VIEWS.COMMAND_HISTORY]: () => h(CommandHistory, { history: state.commandHistory }),
     [VIEWS.NOTEBOOK_ACTIONS]: () => h(NotebookActionsMenu, {
-      notebook: state.currentNotebook?.name,
-      workspace: state.currentNotebook?.workspace,
+      notebook: state.currentNotebook?.name || '',
+      workspace: state.currentNotebook?.workspace || '',
       selectedOption: state.selectedNotebookAction,
       completedJobs: state.completedJobs,
       activeJobs: state.activeJobs,
       currentJob: state.currentJob
     }),
     [VIEWS.JOB_MENU]: () => h(JobMenu, {
-      job: state.currentJob,
+      job: state.currentJob!,
       selectedOption: state.selectedJobOption
     }),
     [VIEWS.JOB_STATUS]: () => h(JobStatusView, {
       output: state.output,
-      jobInfo: state.currentJob,
+      jobInfo: state.currentJob!,
       loading: state.loading,
       error: state.error
     }),
@@ -1516,6 +1773,4 @@ const FabricCLI = () => {
 
 // Clear console and render
 console.clear();
-render(h(FabricCLI));
-
-
+render(h(weave)); 
