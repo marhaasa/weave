@@ -80,7 +80,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./dist/weave-${{ needs.create-release.outputs.version }}.tar.gz
+          asset_path: ./release/weave-${{ needs.create-release.outputs.version }}.tar.gz
           asset_name: weave-${{ needs.create-release.outputs.version }}.tar.gz
           asset_content_type: application/gzip
 
