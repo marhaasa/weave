@@ -66,11 +66,12 @@ jobs:
 
       - name: Create tarball
         run: |
-          mkdir -p dist
-          tar -czf dist/weave-${{ needs.create-release.outputs.version }}.tar.gz \
+          mkdir -p release
+          tar -czf release/weave-${{ needs.create-release.outputs.version }}.tar.gz \
           --exclude='.git*' \
-          --exclude='dist' \
           --exclude='.github' \
+          --exclude='node_modules' \
+          --exclude='release' \
           .
 
       - name: Upload Release Asset
