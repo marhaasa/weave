@@ -1,14 +1,13 @@
-# weave
-
-![weave](weave.png)
+![weave](weave.png?)
 
 An interactive Terminal User Interface (TUI) for [Microsoft Fabric CLI](https://microsoft.github.io/fabric-cli/) built with [INK](https://github.com/vadimdemedes/ink).
 
 ## Prerequisites
 
+- Python 3.10 or higher
 - Node.js 16.0.0 or higher
-- [Microsoft Fabric CLI (`fab`)](https://microsoft.github.io/fabric-cli/) installed and configured (fab auth login)
-- Authenticated Fabric session
+- [Microsoft Fabric CLI (`fab`)](https://microsoft.github.io/fabric-cli/) installed and configured
+- Authenticated Fabric session (having run `fab auth login` before using weave)
 
 ## Installation
 
