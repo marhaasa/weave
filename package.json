@@ -1,6 +1,6 @@
 {
   "name": "weave",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "An interactive TUI for Microsoft Fabric CLI",
   "main": "dist/weave.js",
   "type": "module",
