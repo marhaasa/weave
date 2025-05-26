@@ -14,7 +14,6 @@
     "watch": "tsc --watch",
     "clean": "rm -rf dist",
     "prebuild": "npm run clean",
-    "postinstall": "npm run build"
   },
   "dependencies": {
     "ink": "^4.4.1",
