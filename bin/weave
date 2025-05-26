@@ -49,17 +49,17 @@ if (args.includes('--version') || args.includes('-v')) {
 async function loadWeave() {
   try {
     // Try to load from parent directory dist folder (normal case after build)
-    await import(join(__dirname, '..', 'dist', 'weave.js'));
+    await import(join(__dirname, '..', 'dist', 'index.js'));
   } catch (err) {
     try {
       // If that fails, try the development version (running with tsx)
-      await import(join(__dirname, '..', 'weave.ts'));
+      await import(join(__dirname, '..', 'src', 'index.tsx'));
     } catch (err2) {
       try {
         // Fallback: try current directory
-        await import(join(__dirname, 'weave.js'));
+        await import(join(__dirname, 'index.js'));
       } catch (err3) {
-        console.error('Error: Could not find weave.js or weave.ts');
+        console.error('Error: Could not find index.js or src/index.tsx');
         console.error('Please ensure the package is built correctly.');
         console.error('Run "npm run build" to compile TypeScript files.');
         process.exit(1);

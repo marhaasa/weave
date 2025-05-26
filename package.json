@@ -2,18 +2,21 @@
   "name": "weave",
   "version": "0.1.7",
   "description": "An interactive TUI for Microsoft Fabric CLI",
-  "main": "dist/weave.js",
+  "main": "dist/index.js",
   "type": "module",
   "bin": {
     "weave": "./bin/weave"
   },
   "scripts": {
     "build": "tsc",
-    "start": "npm run build && node dist/weave.js",
-    "dev": "tsx weave.ts",
+    "start": "npm run build && node dist/index.js",
+    "dev": "tsx src/index.tsx",
+    "dev:watch": "tsx watch src/index.tsx",
+    "dev:old": "tsx weave.ts",
     "watch": "tsc --watch",
     "clean": "rm -rf dist",
     "prebuild": "npm run clean",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "ink": "^4.4.1",

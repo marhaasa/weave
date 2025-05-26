@@ -14,13 +14,13 @@
     "resolveJsonModule": true,
     "allowJs": true,
     "outDir": "./dist",
-    "rootDir": "./",
+    "rootDir": "./src",
     "declaration": true,
     "sourceMap": true,
     "allowSyntheticDefaultImports": true
   },
   "include": [
-    "weave.ts"
+    "src/**/*"
   ],
   "exclude": [
     "node_modules",

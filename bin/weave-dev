@@ -4,5 +4,5 @@
 # Get the directory of this script
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# Run tsx with weave.ts
-exec npx tsx "$DIR/../weave.ts" "$@"
+# Run tsx with modular src/index.tsx
+exec npx tsx "$DIR/../src/index.tsx" "$@"
