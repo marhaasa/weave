@@ -49,9 +49,14 @@ Start the application using npm:
 npm start
 ```
 
-Or run directly with Node.js:
+Or run in development mode:
 ```bash
-node weave.js
+npm run dev
+```
+
+Or use the bin script directly:
+```bash
+./bin/weave
 ```
 
 ## Features
