@@ -70,7 +70,6 @@ jobs:
           tar -czf release/weave-${{ needs.create-release.outputs.version }}.tar.gz \
           --exclude='.git*' \
           --exclude='.github' \
-          --exclude='node_modules' \
           --exclude='release' \
           .
 
