@@ -58,15 +58,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Prune dev dependencies
+        run: npm prune --omit=dev
+
       - name: Create tarball
         run: |
           mkdir -p dist
           tar -czf dist/weave-${{ needs.create-release.outputs.version }}.tar.gz \
-            --exclude='.git*' \
-            --exclude='dist' \
-            --exclude='node_modules' \
-            --exclude='.github' \
-            .
+          --exclude='.git*' \
+          --exclude='dist' \
+          --exclude='.github' \
+          .
 
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
@@ -103,42 +108,15 @@ jobs:
       - name: Update Formula
         run: |
           cd homebrew-tools
-          cat > Formula/weave.rb << EOF
-          class Weave < Formula
-            desc "An interactive TUI for Microsoft Fabric CLI"
-            homepage "https://github.com/${{ github.repository }}"
-            url "https://github.com/${{ github.repository }}/releases/download/v${{ needs.create-release.outputs.version }}/weave-${{ needs.create-release.outputs.version }}.tar.gz"
-            sha256 "${{ steps.calculate_sha.outputs.sha256 }}"
-            license "MIT"
-            version "${{ needs.create-release.outputs.version }}"
-            
-            depends_on "node"
-            
-            def install
-              # Install all files to libexec
-              libexec.install Dir["*"]
-              
-              # Install npm dependencies
-              cd libexec do
-                system "npm", "ci", "--production"
-              end
-              
-              # Create wrapper script
-              (bin/"weave").write <<~EOS
-                #!/bin/bash
-                export NODE_PATH="#{libexec}/node_modules"
-                exec "#{Formula["node"].opt_bin}/node" "#{libexec}/weave.js" "$@"
-              EOS
-              
-              # Make wrapper executable
-              chmod 0755, bin/"weave"
-            end
-            
-            test do
-              assert_match "weave v", shell_output("#{bin}/weave --version")
-            end
-          end
-          EOF
+
+          # Update version, URL, and sha256 in-place using sed
+          sed -i.bak \
+            -e "s|^  url \".*\"|  url \"https://github.com/${{ github.repository }}/releases/download/v${{ needs.create-release.outputs.version }}/weave-${{ needs.create-release.outputs.version }}.tar.gz\"|" \
+            -e "s|^  sha256 \".*\"|  sha256 \"${{ steps.calculate_sha.outputs.sha256 }}\"|" \
+            -e "s|^  version \".*\"|  version \"${{ needs.create-release.outputs.version }}\"|" \
+            Formula/weave.rb
+
+          rm Formula/weave.rb.bak
 
       - name: Commit and push changes
         run: |
