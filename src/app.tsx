@@ -223,7 +223,7 @@ export const App: React.FC = () => {
                 `📊 Last Job Details:\n\n` +
                 `🔖 Job ID: ${jobId}\n` +
                 `📋 Status: ${statusInfo.status}\n` +
-                `🕐 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}\n` +
+                `🚀 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}\n` +
                 `🏁 End Time: ${statusInfo.endTime ? ParsingUtils.formatDateTime(statusInfo.endTime) : 'Still running...'}\n\n` +
                 `💡 Press 'q' or ESC to return to notebook actions menu`
               );

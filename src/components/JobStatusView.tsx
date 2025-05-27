@@ -37,7 +37,7 @@ export const JobStatusView: React.FC<JobStatusViewProps> = React.memo(({ output,
         `${statusConfig.icon} Status: ${statusInfo.status}`
       ),
       createText({ key: 'start-time', color: COLORS.PRIMARY },
-        `⏱️ Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}`
+        `🚀 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}`
       ),
       createText({ key: 'end-time', color: COLORS.PRIMARY },
         `🏁 End Time: ${statusInfo.endTime ? ParsingUtils.formatDateTime(statusInfo.endTime) : 'Still running...'}`
