@@ -110,8 +110,8 @@ if [ -n "$CHANGELOG_ENTRIES" ]; then
 ## $NEW_VERSION - $CURRENT_DATE
 
 $SECTION
-$CHANGELOG_ENTRIES
 EOF
+  echo -e "$CHANGELOG_ENTRIES" >> /tmp/changelog_entry
   
   # Insert the new entry after line 8 in CHANGELOG.md
   head -n 8 CHANGELOG.md > /tmp/changelog_new
