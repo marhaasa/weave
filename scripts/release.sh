@@ -78,31 +78,49 @@ NEW_VERSION=$(node -p "require('./package.json').version")
 print_info "Updating CHANGELOG..."
 echo ""
 echo "What changes should be included in this release?"
-echo "Enter changelog entries (one per line). Press Ctrl+D when done:"
+echo "Enter changelog entries (one per line). Type 'done' when finished:"
 echo ""
 
 # Read changelog entries from user
 CHANGELOG_ENTRIES=""
-while IFS= read -r line || [ -n "$line" ]; do
-  if [ -n "$line" ]; then
-    CHANGELOG_ENTRIES="${CHANGELOG_ENTRIES}- ${line}\n"
+while true; do
+  read -r line
+  if [ "$line" = "done" ] || [ -z "$line" ]; then
+    break
   fi
+  CHANGELOG_ENTRIES="${CHANGELOG_ENTRIES}- ${line}\n"
 done
 
 if [ -n "$CHANGELOG_ENTRIES" ]; then
   # Get current date
   CURRENT_DATE=$(date +"%Y-%m-%d")
   
-  # Create the new changelog entry
-  NEW_ENTRY="## $NEW_VERSION - $CURRENT_DATE\n\n### ${VERSION_TYPE^}\n${CHANGELOG_ENTRIES}\n"
+  # Capitalize version type
+  if [ "$VERSION_TYPE" = "patch" ]; then
+    SECTION="### Fixed"
+  elif [ "$VERSION_TYPE" = "minor" ]; then
+    SECTION="### Added"
+  elif [ "$VERSION_TYPE" = "major" ]; then
+    SECTION="### Changed"
+  fi
   
-  # Insert the new entry after the header (line 8)
-  sed -i.bak "8a\\
-\\
-$NEW_ENTRY" CHANGELOG.md
+  # Create temporary file with new entry
+  cat > /tmp/changelog_entry << EOF
+
+## $NEW_VERSION - $CURRENT_DATE
+
+$SECTION
+$CHANGELOG_ENTRIES
+EOF
   
-  # Remove backup file
-  rm CHANGELOG.md.bak
+  # Insert the new entry after line 8 in CHANGELOG.md
+  head -n 8 CHANGELOG.md > /tmp/changelog_new
+  cat /tmp/changelog_entry >> /tmp/changelog_new
+  tail -n +9 CHANGELOG.md >> /tmp/changelog_new
+  mv /tmp/changelog_new CHANGELOG.md
+  
+  # Clean up temp files
+  rm -f /tmp/changelog_entry
   
   # Add CHANGELOG to the commit
   git add CHANGELOG.md
