@@ -74,6 +74,45 @@ npm version $VERSION_TYPE -m "Release v%s"
 # Get the new version for display
 NEW_VERSION=$(node -p "require('./package.json').version")
 
+# Update CHANGELOG.md
+print_info "Updating CHANGELOG..."
+echo ""
+echo "What changes should be included in this release?"
+echo "Enter changelog entries (one per line). Press Ctrl+D when done:"
+echo ""
+
+# Read changelog entries from user
+CHANGELOG_ENTRIES=""
+while IFS= read -r line; do
+  if [ -n "$line" ]; then
+    CHANGELOG_ENTRIES="${CHANGELOG_ENTRIES}- ${line}\n"
+  fi
+done
+
+if [ -n "$CHANGELOG_ENTRIES" ]; then
+  # Get current date
+  CURRENT_DATE=$(date +"%Y-%m-%d")
+  
+  # Create the new changelog entry
+  NEW_ENTRY="## $NEW_VERSION - $CURRENT_DATE\n\n### ${VERSION_TYPE^}\n${CHANGELOG_ENTRIES}\n"
+  
+  # Insert the new entry after the header (line 8)
+  sed -i.bak "8a\\
+\\
+$NEW_ENTRY" CHANGELOG.md
+  
+  # Remove backup file
+  rm CHANGELOG.md.bak
+  
+  # Add CHANGELOG to the commit
+  git add CHANGELOG.md
+  git commit --amend --no-edit
+  
+  print_info "CHANGELOG.md updated"
+else
+  print_warning "No changelog entries provided, skipping CHANGELOG update"
+fi
+
 # Push changes and tags
 print_info "Pushing changes and tags to origin..."
 git push origin main --tags
