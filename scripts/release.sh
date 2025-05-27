@@ -83,7 +83,7 @@ echo ""
 
 # Read changelog entries from user
 CHANGELOG_ENTRIES=""
-while IFS= read -r line; do
+while IFS= read -r line || [ -n "$line" ]; do
   if [ -n "$line" ]; then
     CHANGELOG_ENTRIES="${CHANGELOG_ENTRIES}- ${line}\n"
   fi
