@@ -9,6 +9,8 @@ import { useWeaveState } from './hooks/useWeaveState.js';
 import { useCommandExecution } from './hooks/useCommandExecution.js';
 import { createInputHandlers } from './hooks/useInputHandlers.js';
 import { useFabricService } from './hooks/useFabricService.js';
+import { useSmartJobPolling } from './hooks/useJobPolling.js';
+import { useDebouncedAsync } from './hooks/useDebounced.js';
 
 
 // Components
@@ -43,6 +45,24 @@ export const App: React.FC = () => {
     const timer = setTimeout(() => setShowLoadingScreen(false), TIMEOUTS.LOADING_SCREEN);
     return () => clearTimeout(timer);
   }, []);
+
+  // Job polling to track active job statuses
+  useSmartJobPolling({
+    activeJobs: state.activeJobs,
+    fabricService,
+    onJobStatusUpdate: useCallback((jobId: string, statusInfo) => {
+      // Update UI if needed when job status changes
+      if (state.currentJob?.jobId === jobId) {
+        // Could trigger a refresh of job status view if currently displayed
+      }
+    }, [state.currentJob]),
+    onJobCompleted: useCallback((workspace: string, itemName: string) => {
+      actions.markJobCompleted(workspace, itemName);
+      // Invalidate related caches to get fresh status on next query
+      fabricService.invalidateCache(`job-list:${workspace}:${itemName}`);
+      fabricService.invalidateCache(`job-status:${workspace}:${itemName}`);
+    }, [actions, fabricService])
+  });
 
   const handleInteractiveShell = useCallback(() => {
     exit();
@@ -442,22 +462,26 @@ export const App: React.FC = () => {
     }
   }, [fabricService, actions]);
 
+  // Debounced versions of handlers to prevent excessive API calls
+  const debouncedWorkspaceSelection = useDebouncedAsync(handleWorkspaceSelection, 200);
+  const debouncedRefreshWorkspaces = useDebouncedAsync(refreshWorkspaces, 500);
+
   const handlers: Handlers = useMemo(() => ({
     handleMenuSelection,
-    handleWorkspaceSelection,
+    handleWorkspaceSelection: debouncedWorkspaceSelection,
     handleWorkspaceItemSelection,
     handleItemActionSelection,
     handleJobMenuSelection,
     checkJobStatus,
-    refreshWorkspaces
+    refreshWorkspaces: debouncedRefreshWorkspaces
   }), [
     handleMenuSelection,
-    handleWorkspaceSelection,
+    debouncedWorkspaceSelection,
     handleWorkspaceItemSelection,
     handleItemActionSelection,
     handleJobMenuSelection,
     checkJobStatus,
-    refreshWorkspaces
+    debouncedRefreshWorkspaces
   ]);
 
   const inputHandlers = createInputHandlers(state, actions, handlers);

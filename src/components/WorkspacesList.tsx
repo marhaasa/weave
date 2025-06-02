@@ -1,5 +1,5 @@
 import React, { ReactElement } from 'react';
-import { createFullWidthBox, createText, createMenuItem, createLoadingDisplay, createErrorDisplay, createPaginatedList, spacer } from '../utils/uiHelpers.js';
+import { createFullWidthBox, createText, createMenuItem, createLoadingDisplay, createErrorDisplay, createPaginatedList, createSkeletonList, spacer } from '../utils/uiHelpers.js';
 import { COLORS } from '../constants/index.js';
 
 interface WorkspacesListProps {
@@ -25,7 +25,15 @@ export const WorkspacesList: React.FC<WorkspacesListProps> = React.memo(({
   ];
 
   if (loading) {
-    elements.push(createLoadingDisplay('Loading workspaces...', 'workspaces'));
+    elements.push(
+      createText({ key: 'workspace-loading', color: COLORS.SUCCESS, bold: true },
+        'Loading workspaces...'
+      ),
+      spacer('loading-spacer')
+    );
+    // Show skeleton items while loading
+    const skeletonItems = createSkeletonList(5, 0);
+    elements.push(...skeletonItems);
   } else if (error) {
     elements.push(...createErrorDisplay(error, 'workspaces'));
     elements.push(

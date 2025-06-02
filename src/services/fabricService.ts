@@ -3,11 +3,52 @@ import { ParsingUtils } from '../utils/parsing.js';
 import type { CommandResult, WorkspaceItem, JobInfo, StatusInfo, ExecuteCommandOptions } from '../types/index.js';
 
 export class FabricService {
+  private cache = new Map<string, { data: any; timestamp: number }>();
+  private readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+  
   constructor(
     private executeCommand: (command: string, options?: ExecuteCommandOptions) => Promise<CommandResult>
   ) { }
 
-  async listWorkspaces(): Promise<string[]> {
+  private getCacheKey(type: 'workspaces' | 'workspace-items' | 'job-status' | 'job-list', ...params: string[]): string {
+    return `${type}:${params.join(':')}`;
+  }
+
+  private getCachedData<T>(key: string): T | null {
+    const cached = this.cache.get(key);
+    if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
+      return cached.data as T;
+    }
+    this.cache.delete(key); // Clean up expired cache
+    return null;
+  }
+
+  private setCachedData<T>(key: string, data: T): void {
+    this.cache.set(key, { data, timestamp: Date.now() });
+  }
+
+  public invalidateCache(pattern?: string): void {
+    if (!pattern) {
+      this.cache.clear();
+      return;
+    }
+    for (const key of this.cache.keys()) {
+      if (key.includes(pattern)) {
+        this.cache.delete(key);
+      }
+    }
+  }
+
+  async listWorkspaces(forceRefresh = false): Promise<string[]> {
+    const cacheKey = this.getCacheKey('workspaces');
+    
+    if (!forceRefresh) {
+      const cached = this.getCachedData<string[]>(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
+
     const command = CommandBuilder.listWorkspaces();
     const result = await this.executeCommand(command);
 
@@ -15,10 +56,21 @@ export class FabricService {
       throw new Error(`Failed to list workspaces: ${result.error || 'Unknown error'}`);
     }
 
-    return ParsingUtils.parseWorkspaces(result.output);
+    const workspaces = ParsingUtils.parseWorkspaces(result.output);
+    this.setCachedData(cacheKey, workspaces);
+    return workspaces;
   }
 
-  async listWorkspaceItems(workspace: string): Promise<WorkspaceItem[]> {
+  async listWorkspaceItems(workspace: string, forceRefresh = false): Promise<WorkspaceItem[]> {
+    const cacheKey = this.getCacheKey('workspace-items', workspace);
+    
+    if (!forceRefresh) {
+      const cached = this.getCachedData<WorkspaceItem[]>(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
+
     const command = CommandBuilder.listWorkspace(workspace);
     const result = await this.executeCommand(command);
 
@@ -26,7 +78,9 @@ export class FabricService {
       throw new Error(`Failed to list items in ${workspace}: ${result.error || 'Unknown error'}`);
     }
 
-    return ParsingUtils.parseWorkspaceItems(result.output);
+    const items = ParsingUtils.parseWorkspaceItems(result.output);
+    this.setCachedData(cacheKey, items);
+    return items;
   }
 
   async startJob(workspace: string, itemName: string): Promise<JobInfo> {
@@ -41,6 +95,10 @@ export class FabricService {
     if (!jobId) {
       throw new Error('Failed to extract job ID from output');
     }
+
+    // Invalidate job-related cache since we're starting a new job
+    this.invalidateCache(`job-list:${workspace}:${itemName}`);
+    this.invalidateCache(`job-status:${workspace}:${itemName}`);
 
     return {
       jobId,
@@ -66,7 +124,16 @@ export class FabricService {
     return ParsingUtils.parseJobStatus(result.output);
   }
 
-  async getJobList(workspace: string, itemName: string): Promise<string | null> {
+  async getJobList(workspace: string, itemName: string, useCache = true): Promise<string | null> {
+    const cacheKey = this.getCacheKey('job-list', workspace, itemName);
+    
+    if (useCache) {
+      const cached = this.getCachedData<string | null>(cacheKey);
+      if (cached !== null) {
+        return cached;
+      }
+    }
+
     const command = CommandBuilder.job.list(workspace, itemName);
     const result = await this.executeCommand(command, { skipCache: true, silent: true });
 
@@ -74,6 +141,8 @@ export class FabricService {
       throw new Error(`Failed to get job list: ${result.error || 'Unknown error'}`);
     }
 
-    return ParsingUtils.extractGuid(result.output);
+    const jobId = ParsingUtils.extractGuid(result.output);
+    this.setCachedData(cacheKey, jobId);
+    return jobId;
   }
 }

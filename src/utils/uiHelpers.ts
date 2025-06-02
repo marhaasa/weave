@@ -28,12 +28,14 @@ export const createMenuItem = (
   label: string,
   index: number,
   selectedIndex: number,
-  bgColor: string = COLORS.HIGHLIGHT_BG
+  bgColor: string = COLORS.HIGHLIGHT_BG,
+  extraProps?: any
 ): ReactElement =>
   createText({
     key: `menu-item-${index}`,
     color: index === selectedIndex ? 'black' : 'white',
-    backgroundColor: index === selectedIndex ? bgColor : undefined
+    backgroundColor: index === selectedIndex ? bgColor : undefined,
+    ...extraProps
   }, label);
 
 export const createErrorDisplay = (error: string, keyPrefix: string = ''): ReactElement[] => [
@@ -43,6 +45,23 @@ export const createErrorDisplay = (error: string, keyPrefix: string = ''): React
 
 export const createLoadingDisplay = (message: string = 'Loading...', keyPrefix: string = ''): ReactElement =>
   createText({ key: `${keyPrefix}loading`, color: COLORS.WARNING }, `⏳ ${message}`);
+
+export const createSkeletonItem = (index: number, isSelected: boolean = false): ReactElement => {
+  const skeletonText = '█'.repeat(Math.floor(Math.random() * 20) + 10);
+  return createMenuItem(
+    `${skeletonText}`,
+    index,
+    isSelected ? index : -1,
+    COLORS.SECONDARY,
+    { dimColor: true, italic: true }
+  );
+};
+
+export const createSkeletonList = (count: number, selectedIndex: number = -1): ReactElement[] => {
+  return Array.from({ length: count }, (_, index) => 
+    createSkeletonItem(index, index === selectedIndex)
+  );
+};
 
 export const createHeader = (title: string, key: string = 'header'): ReactElement =>
   createText({ 
