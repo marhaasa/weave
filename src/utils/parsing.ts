@@ -36,9 +36,13 @@ export const ParsingUtils = {
       .filter(name => name && name.length > 0);
   },
 
-  parseWorkspaceItems: (output: string): string[] => {
+  parseWorkspaceItems: (output: string): WorkspaceItem[] => {
     return ParsingUtils.parseLines(output)
-      .filter(item => item && item.length > 0);
+      .filter(item => item && item.length > 0)
+      .map(item => ({
+        name: item.trim(),
+        isNotebook: item.endsWith('.Notebook')
+      }));
   },
 
   extractJobId: (output: string): string | null => {

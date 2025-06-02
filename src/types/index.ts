@@ -100,6 +100,7 @@ export interface ParseLinesFilters {
   skipPatterns?: string[];
 }
 
+
 export interface Actions {
   updateState: (updates: Partial<State>) => void;
   resetState: () => void;

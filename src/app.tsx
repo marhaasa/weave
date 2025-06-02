@@ -3,10 +3,13 @@ import { useInput, useApp } from 'ink';
 import { spawn } from 'child_process';
 import type { Key } from 'ink';
 
+
 // Hooks
 import { useWeaveState } from './hooks/useWeaveState.js';
 import { useCommandExecution } from './hooks/useCommandExecution.js';
 import { createInputHandlers } from './hooks/useInputHandlers.js';
+import { useFabricService } from './hooks/useFabricService.js';
+
 
 // Components
 import { LoadingScreen } from './components/LoadingScreen.js';
@@ -25,10 +28,13 @@ import { CommandBuilder } from './utils/commandBuilder.js';
 import { ParsingUtils } from './utils/parsing.js';
 import { VIEWS, TIMEOUTS, LIMITS } from './constants/index.js';
 import type { MenuOption, Handlers } from './types/index.js';
+import { FabricService } from './services/fabricService.js';
 
 export const App: React.FC = () => {
   const { state, actions } = useWeaveState();
   const { executeCommand, executeCommandWithRetry, executeCommandWithStatusUpdates } = useCommandExecution(actions, state.config);
+  const fabricService = useFabricService(executeCommand);
+
   const { exit } = useApp();
   const [showLoadingScreen, setShowLoadingScreen] = useState<boolean>(true);
 
@@ -71,6 +77,38 @@ export const App: React.FC = () => {
     }, 100);
   }, [exit]);
 
+  const handleMenuSelection = useCallback(async () => {
+        const selected = menuOptions[state.selectedOption];
+
+        if (selected.action === 'exit') {
+          process.exit(0);
+          return;
+        }
+
+        if (selected.action === 'interactive') {
+          handleInteractiveShell();
+          return;
+        }
+
+        if (selected.action === 'history') {
+          actions.setCurrentView(VIEWS.COMMAND_HISTORY);
+          return;
+        }
+
+        actions.setCurrentView(selected.view || VIEWS.OUTPUT);
+        actions.setWorkspaces([]);
+        actions.setSelectedWorkspace(0);
+
+        try {
+          if (selected.command === CommandBuilder.listWorkspaces()) {
+            const workspaceList = await fabricService.listWorkspaces();
+            actions.setWorkspaces(workspaceList);
+          }
+        } catch (error: any) {
+          actions.setError(error.message);
+        }
+    }, [state.selectedOption, actions, fabricService, handleInteractiveShell]);
+
   const menuOptions: MenuOption[] = [
     { label: 'Workspaces', command: CommandBuilder.listWorkspaces(), view: VIEWS.WORKSPACES },
     { label: 'Manual Interactive Shell', action: 'interactive' },
@@ -78,248 +116,207 @@ export const App: React.FC = () => {
     { label: 'Exit', action: 'exit' }
   ];
 
-  const handleMenuSelection = useCallback(async () => {
-    const selected = menuOptions[state.selectedOption];
-
-    if (selected.action === 'exit') {
-      process.exit(0);
-      return;
-    }
-
-    if (selected.action === 'interactive') {
-      handleInteractiveShell();
-      return;
-    }
-
-    if (selected.action === 'history') {
-      actions.setCurrentView(VIEWS.COMMAND_HISTORY);
-      return;
-    }
-
-    actions.setCurrentView(selected.view || VIEWS.OUTPUT);
-    actions.setWorkspaces([]);
-    actions.setSelectedWorkspace(0);
-
-    const result = selected.command === CommandBuilder.listWorkspaces()
-      ? await executeCommandWithRetry(selected.command!, { timeout: TIMEOUTS.WORKSPACE_LOAD })
-      : await executeCommand(selected.command!);
-
-    if (result.success && selected.command === CommandBuilder.listWorkspaces()) {
-      const workspaceList = ParsingUtils.parseWorkspaces(result.output);
-      actions.setWorkspaces(workspaceList);
-    }
-  }, [state.selectedOption, actions, executeCommand, executeCommandWithRetry, handleInteractiveShell]);
-
   const handleWorkspaceSelection = useCallback(async () => {
-    if (state.workspaces.length === 0) return;
+        if (state.workspaces.length === 0) return;
 
-    const selectedWorkspaceName = state.workspaces[state.selectedWorkspace];
-    const command = CommandBuilder.listWorkspace(selectedWorkspaceName);
+        const selectedWorkspaceName = state.workspaces[state.selectedWorkspace];
 
-    actions.updateState({
-      currentView: VIEWS.WORKSPACE_ITEMS,
-      workspaceItems: [],
-      selectedWorkspaceItem: 0
-    });
+        actions.updateState({
+          currentView: VIEWS.WORKSPACE_ITEMS,
+          workspaceItems: [],
+          selectedWorkspaceItem: 0
+        });
 
-    const result = await executeCommand(command);
-
-    if (result.success) {
-      const items = ParsingUtils.parseWorkspaceItems(result.output);
-      actions.setWorkspaceItems(items);
-    } else {
-      actions.setCurrentView(VIEWS.WORKSPACES);
-    }
-  }, [state.workspaces, state.selectedWorkspace, actions, executeCommand]);
+        try {
+          const items = await fabricService.listWorkspaceItems(selectedWorkspaceName);
+          actions.setWorkspaceItems(items);
+        } catch (error: any) {
+          actions.setError(error.message);
+          actions.setCurrentView(VIEWS.WORKSPACES);
+        }
+    }, [state.workspaces, state.selectedWorkspace, actions, fabricService]);
 
   const handleWorkspaceItemSelection = useCallback(async () => {
-    if (state.workspaceItems.length === 0) return;
+        if (state.workspaceItems.length === 0) return;
 
-    const selectedItem = state.workspaceItems[state.selectedWorkspaceItem];
-    const selectedWorkspaceName = state.workspaces[state.selectedWorkspace];
+        const selectedItem = state.workspaceItems[state.selectedWorkspaceItem];
+        const selectedWorkspaceName = state.workspaces[state.selectedWorkspace];
 
-    const itemName = typeof selectedItem === 'string' ? selectedItem : selectedItem.name;
-    const isNotebook = ParsingUtils.isNotebook(selectedItem);
+        const itemName = typeof selectedItem === 'string' ? selectedItem : selectedItem.name;
+        const isNotebook = ParsingUtils.isNotebook(selectedItem);
 
-    if (isNotebook) {
-      actions.updateState({
-        currentNotebook: { name: itemName, workspace: selectedWorkspaceName },
-        selectedNotebookAction: 0,
-        currentView: VIEWS.NOTEBOOK_ACTIONS
-      });
-    } else {
-      actions.setError(`Selected item "${itemName}" is not a notebook. Only .Notebook items can be started.`);
-      actions.setCurrentView(VIEWS.OUTPUT);
-    }
-  }, [state.workspaceItems, state.selectedWorkspaceItem, state.workspaces, state.selectedWorkspace, actions]);
+        if (isNotebook) {
+          actions.updateState({
+            currentNotebook: { name: itemName, workspace: selectedWorkspaceName },
+            selectedNotebookAction: 0,
+            currentView: VIEWS.NOTEBOOK_ACTIONS
+          });
+        } else {
+          actions.setError(`Selected item "${itemName}" is not a notebook. Only .Notebook items can be started.`);
+          actions.setCurrentView(VIEWS.OUTPUT);
+        }
+    }, [state.workspaceItems, state.selectedWorkspaceItem, state.workspaces, state.selectedWorkspace, actions]);
 
   const handleNotebookActionSelection = useCallback(async () => {
-    if (!state.currentNotebook) return;
+        if (!state.currentNotebook) return;
 
-    const actionHandlers: Record<number, () => Promise<void> | void> = {
-      0: async () => {
-        const command = CommandBuilder.job.start(state.currentNotebook!.workspace, state.currentNotebook!.name);
-        actions.setCurrentView(VIEWS.OUTPUT);
-        actions.setOutput('🚀 Starting job in background...');
+        const actionHandlers: Record<number, () => Promise<void> | void> = {
+          0: async () => {
+            actions.setCurrentView(VIEWS.OUTPUT);
+            actions.setOutput('🚀 Starting job in background...');
 
-        const result = await executeCommand(command, { silent: true });
+            try {
+              const job = await fabricService.startJob(
+                state.currentNotebook!.workspace,
+                state.currentNotebook!.name
+              );
 
-        if (result.success) {
-          const jobId = ParsingUtils.extractJobId(result.output);
-          if (jobId) {
-            actions.addActiveJob(jobId, state.currentNotebook!.workspace, state.currentNotebook!.name);
-            actions.setOutput(
-              `✅ Job started successfully in background\n\n` +
-              `📍 Job ID: ${jobId}\n\n` +
-              `💡 Use 'View Last Job Details' to check status\n\n` +
-              `💡 Press 'q' or ESC to return to notebook actions menu`
-            );
-          } else {
-            actions.setOutput(`❌ Failed to extract job ID\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
-          }
-        } else {
-          actions.setOutput(`❌ Failed to start job: ${result.error}\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
-        }
-      },
-
-      1: async () => {
-        const command = CommandBuilder.job.runSync(state.currentNotebook!.workspace, state.currentNotebook!.name);
-        actions.setCurrentView(VIEWS.OUTPUT);
-        actions.setOutput('🔄 Starting synchronous job execution...\n');
-
-        try {
-          const result = await executeCommandWithStatusUpdates(command, { timeout: TIMEOUTS.JOB_RUN });
-
-          if (result.success) {
-            actions.markJobCompleted(state.currentNotebook!.workspace, state.currentNotebook!.name);
-            actions.setOutput(
-              `✅ Job completed successfully (${result.duration}s)\n\n` +
-              `💡 Press 'q' or ESC to return to notebook actions menu`
-            );
-          }
-        } catch (error: any) {
-          actions.markJobCompleted(state.currentNotebook!.workspace, state.currentNotebook!.name);
-          actions.setOutput(`❌ Job failed: ${error.message}\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
-        }
-      },
-
-      2: async () => {
-        const listCommand = CommandBuilder.job.list(state.currentNotebook!.workspace, state.currentNotebook!.name);
-        actions.setCurrentView(VIEWS.OUTPUT);
-        actions.setOutput('🔍 Getting job details...');
-
-        const listResult = await executeCommand(listCommand, { skipCache: true, silent: true });
-        if (listResult.success) {
-          const jobId = ParsingUtils.extractGuid(listResult.output);
-
-          if (jobId) {
-            const statusCommand = CommandBuilder.job.status(state.currentNotebook!.workspace, state.currentNotebook!.name, jobId);
-            const statusResult = await executeCommand(statusCommand, { skipCache: true });
-
-            if (statusResult.success) {
-              const statusInfo = ParsingUtils.parseJobStatus(statusResult.output);
-
+              actions.addActiveJob(job.jobId, job.workspace, job.notebook);
               actions.setOutput(
-                `📊 Last Job Details:\n\n` +
-                `🔖 Job ID: ${jobId}\n` +
-                `📋 Status: ${statusInfo.status}\n` +
-                `🚀 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}\n` +
-                `🏁 End Time: ${statusInfo.endTime ? ParsingUtils.formatDateTime(statusInfo.endTime) : 'Still running...'}\n\n` +
+                `✅ Job started successfully in background\n\n` +
+                `📍 Job ID: ${job.jobId}\n\n` +
+                `💡 Use 'View Last Job Details' to check status\n\n` +
                 `💡 Press 'q' or ESC to return to notebook actions menu`
               );
-            } else {
-              actions.setOutput(`❌ Failed to get job details\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
+            } catch (error: any) {
+              actions.setOutput(`❌ Failed to start job: ${error.message}\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
             }
-          } else {
-            actions.setOutput(`ℹ️ No job history found for this notebook\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
+          },
+
+          1: async () => {
+            actions.setCurrentView(VIEWS.OUTPUT);
+            actions.setOutput('🔄 Starting synchronous job execution...\n');
+
+            try {
+              const result = await executeCommandWithStatusUpdates(
+                CommandBuilder.job.runSync(state.currentNotebook!.workspace, state.currentNotebook!.name),
+                { timeout: TIMEOUTS.JOB_RUN }
+              );
+
+              if (result.success) {
+                actions.markJobCompleted(state.currentNotebook!.workspace, state.currentNotebook!.name);
+                actions.setOutput(
+                  `✅ Job completed successfully (${result.duration}s)\n\n` +
+                  `💡 Press 'q' or ESC to return to notebook actions menu`
+                );
+              }
+            } catch (error: any) {
+              actions.markJobCompleted(state.currentNotebook!.workspace, state.currentNotebook!.name);
+              actions.setOutput(`❌ Job failed: ${error.message}\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
+            }
+          },
+
+          2: async () => {
+            actions.setCurrentView(VIEWS.OUTPUT);
+            actions.setOutput('🔍 Getting job details...');
+
+            try {
+              const jobId = await fabricService.getJobList(
+                state.currentNotebook!.workspace,
+                state.currentNotebook!.name
+              );
+
+              if (jobId) {
+                const statusInfo = await fabricService.getJobStatus(
+                  state.currentNotebook!.workspace,
+                  state.currentNotebook!.name,
+                  jobId
+                );
+
+                actions.setOutput(
+                  `📊 Last Job Details:\n\n` +
+                  `🔖 Job ID: ${jobId}\n` +
+                  `📋 Status: ${statusInfo.status}\n` +
+                  `🚀 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}\n` +
+                  `🏁 End Time: ${statusInfo.endTime ? ParsingUtils.formatDateTime(statusInfo.endTime) : 'Still running...'}\n\n` +
+                  `💡 Press 'q' or ESC to return to notebook actions menu`
+                );
+              } else {
+                actions.setOutput(`ℹ️ No job history found for this notebook\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
+              }
+            } catch (error: any) {
+              actions.setOutput(`❌ Failed to get job details: ${error.message}\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
+            }
+          },
+
+          3: () => {
+            actions.updateState({
+              currentView: VIEWS.WORKSPACE_ITEMS,
+              selectedNotebookAction: 0,
+              currentNotebook: null
+            });
           }
-        } else {
-          actions.setOutput(`❌ Failed to get job list\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
-        }
-      },
+        };
 
-      3: () => {
-        actions.updateState({
-          currentView: VIEWS.WORKSPACE_ITEMS,
-          selectedNotebookAction: 0,
-          currentNotebook: null
-        });
-      }
-    };
-
-    const handler = actionHandlers[state.selectedNotebookAction];
-    if (handler) await handler();
-  }, [state.currentNotebook, state.selectedNotebookAction, actions, executeCommand, executeCommandWithStatusUpdates]);
+        const handler = actionHandlers[state.selectedNotebookAction];
+        if (handler) await handler();
+      }, [state.currentNotebook, state.selectedNotebookAction, actions, fabricService, executeCommandWithStatusUpdates]);
 
   const checkJobStatus = useCallback(async () => {
-    if (!state.currentJob) return;
+      if (!state.currentJob) return;
 
-    const command = CommandBuilder.job.status(
-      state.currentJob.workspace,
-      state.currentJob.notebook,
-      state.currentJob.jobId
-    );
+      try {
+        const statusInfo = await fabricService.getJobStatus(
+          state.currentJob.workspace,
+          state.currentJob.notebook,
+          state.currentJob.jobId
+        );
 
-    const result = await executeCommand(command, { skipCache: true });
-
-    if (result.success) {
-      const statusInfo = ParsingUtils.parseJobStatus(result.output);
-      if (['Completed', 'Succeeded', 'Failed'].includes(statusInfo.status)) {
-        actions.markJobCompleted(state.currentJob.workspace, state.currentJob.notebook);
+        if (['Completed', 'Succeeded', 'Failed'].includes(statusInfo.status)) {
+          actions.markJobCompleted(state.currentJob.workspace, state.currentJob.notebook);
+        }
+      } catch (error: any) {
+        actions.setError(error.message);
       }
-    }
-  }, [state.currentJob, executeCommand, actions]);
+  }, [state.currentJob, fabricService, actions]);
 
   const handleJobMenuSelection = useCallback(async () => {
-    if (!state.currentJob) return;
+      if (!state.currentJob) return;
 
-    const actionHandlers: Record<number, () => Promise<void> | void> = {
-      0: async () => {
-        actions.setCurrentView(VIEWS.JOB_STATUS);
-        await checkJobStatus();
-      },
+      const actionHandlers: Record<number, () => Promise<void> | void> = {
+        0: async () => {
+          actions.setCurrentView(VIEWS.JOB_STATUS);
+          await checkJobStatus();
+        },
 
-      1: async () => {
-        const command = CommandBuilder.job.runSync(state.currentJob!.workspace, state.currentJob!.notebook);
-        actions.setCurrentView(VIEWS.OUTPUT);
-        actions.setOutput('🔄 Starting synchronous job execution...\n');
+        1: async () => {
+          const command = CommandBuilder.job.runSync(state.currentJob!.workspace, state.currentJob!.notebook);
+          actions.setCurrentView(VIEWS.OUTPUT);
+          actions.setOutput('🔄 Starting synchronous job execution...\n');
 
-        try {
-          const result = await executeCommandWithStatusUpdates(command, { timeout: TIMEOUTS.JOB_RUN });
-          if (result.success) {
-            actions.setOutput(
-              `✅ Job completed successfully (${result.duration}s)\n\n` +
-              `💡 Press 'q' or ESC to return to main menu`
-            );
+          try {
+            const result = await executeCommandWithStatusUpdates(command, { timeout: TIMEOUTS.JOB_RUN });
+            if (result.success) {
+              actions.setOutput(
+                `✅ Job completed successfully (${result.duration}s)\n\n` +
+                `💡 Press 'q' or ESC to return to main menu`
+              );
+            }
+          } catch (error: any) {
+            actions.setOutput(`❌ Job failed: ${error.message}\n\n💡 Press 'q' or ESC to return to main menu`);
           }
-        } catch (error: any) {
-          actions.setOutput(`❌ Job failed: ${error.message}\n\n💡 Press 'q' or ESC to return to main menu`);
+        },
+
+        2: () => {
+          actions.updateState({
+            currentView: VIEWS.WORKSPACE_ITEMS,
+            selectedJobOption: 0
+          });
         }
-      },
+      };
 
-      2: () => {
-        actions.updateState({
-          currentView: VIEWS.WORKSPACE_ITEMS,
-          selectedJobOption: 0
-        });
-      }
-    };
-
-    const handler = actionHandlers[state.selectedJobOption];
-    if (handler) await handler();
-  }, [state.currentJob, state.selectedJobOption, actions, checkJobStatus, executeCommandWithStatusUpdates]);
+      const handler = actionHandlers[state.selectedJobOption];
+      if (handler) await handler();
+    }, [state.currentJob, state.selectedJobOption, actions, checkJobStatus, executeCommandWithStatusUpdates]);
 
   const refreshWorkspaces = useCallback(async () => {
-    const result = await executeCommandWithRetry(CommandBuilder.listWorkspaces(), {
-      timeout: TIMEOUTS.WORKSPACE_LOAD,
-      skipCache: true
-    });
-
-    if (result.success) {
-      const workspaceList = ParsingUtils.parseWorkspaces(result.output);
+    try {
+      const workspaceList = await fabricService.listWorkspaces();
       actions.setWorkspaces(workspaceList);
+    } catch (error: any) {
+      actions.setError(error.message);
     }
-  }, [executeCommandWithRetry, actions]);
+  }, [fabricService, actions]);
 
   const handlers: Handlers = useMemo(() => ({
     handleMenuSelection,
