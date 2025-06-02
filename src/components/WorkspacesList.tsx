@@ -1,5 +1,5 @@
 import React, { ReactElement } from 'react';
-import { createBox, createText, createMenuItem, createLoadingDisplay, createErrorDisplay, spacer } from '../utils/uiHelpers.js';
+import { createFullWidthBox, createText, createMenuItem, createLoadingDisplay, createErrorDisplay, createPaginatedList, spacer } from '../utils/uiHelpers.js';
 import { COLORS } from '../constants/index.js';
 
 interface WorkspacesListProps {
@@ -8,6 +8,7 @@ interface WorkspacesListProps {
   loading: boolean;
   error: string;
   loadingProgress: number;
+  terminalHeight?: number;
 }
 
 export const WorkspacesList: React.FC<WorkspacesListProps> = React.memo(({
@@ -15,7 +16,8 @@ export const WorkspacesList: React.FC<WorkspacesListProps> = React.memo(({
   selectedWorkspace,
   loading,
   error,
-  loadingProgress
+  loadingProgress,
+  terminalHeight = 24
 }) => {
   const elements: ReactElement[] = [
     createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, 'Workspaces'),
@@ -32,14 +34,36 @@ export const WorkspacesList: React.FC<WorkspacesListProps> = React.memo(({
       )
     );
   } else if (workspaces.length > 0) {
+    // Calculate available space for list items
+    // Reserve space for: title (1) + spacer (1) + found text (1) + spacer (1) + separator (1) + return menu (1) + padding (2) = 8 lines
+    const reservedLines = 8;
+    const availableLines = Math.max(3, terminalHeight - reservedLines);
+    const maxVisibleItems = Math.min(availableLines, workspaces.length);
+    
     elements.push(
       createText({ key: 'workspace-title', color: COLORS.SUCCESS, bold: true },
         `Found ${workspaces.length} workspace${workspaces.length === 1 ? '' : 's'}:`
       ),
-      spacer('spacer2'),
-      ...workspaces.map((workspace, index) =>
-        createMenuItem(workspace, index, selectedWorkspace, COLORS.SUCCESS_BG)
-      ),
+      spacer('spacer2')
+    );
+    
+    // Add paginated workspace items
+    // If "Return to Main Menu" is selected, show the last items in the list
+    const effectiveSelectedIndex = selectedWorkspace >= workspaces.length 
+      ? workspaces.length - 1 
+      : selectedWorkspace;
+      
+    const paginatedWorkspaces = createPaginatedList(
+      workspaces,
+      effectiveSelectedIndex,
+      (workspace, index, isSelected) => 
+        createMenuItem(workspace, index, selectedWorkspace === index ? index : -1, COLORS.SUCCESS_BG),
+      maxVisibleItems
+    );
+    
+    elements.push(...paginatedWorkspaces);
+    
+    elements.push(
       spacer('separator'),
       createMenuItem('Return to Main Menu', workspaces.length, selectedWorkspace, COLORS.SECONDARY)
     );
@@ -52,5 +76,12 @@ export const WorkspacesList: React.FC<WorkspacesListProps> = React.memo(({
     );
   }
 
-  return createBox({ flexDirection: 'column', padding: 1 }, elements);
+  return createFullWidthBox({ 
+    padding: 1, 
+    alignItems: 'flex-start',
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
+    overflowY: 'hidden'
+  }, elements);
 });

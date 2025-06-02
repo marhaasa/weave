@@ -1,5 +1,5 @@
 import React, { ReactElement } from 'react';
-import { createBox, createText, createMenuItem, spacer } from '../utils/uiHelpers.js';
+import { createFullWidthBox, createText, createMenuItem, spacer } from '../utils/uiHelpers.js';
 import { COLORS } from '../constants/index.js';
 import { ParsingUtils } from '../utils/parsing.js';
 
@@ -55,5 +55,12 @@ export const ItemActionsMenu: React.FC<ItemActionsMenuProps> = React.memo(({
     createMenuItem('Return to Workspace Items', options.length, selectedOption, COLORS.SECONDARY)
   );
 
-  return createBox({ flexDirection: 'column', padding: 1 }, elements.filter(Boolean));
+  return createFullWidthBox({ 
+    padding: 1, 
+    alignItems: 'flex-start',
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
+    overflowY: 'hidden'
+  }, elements.filter(Boolean));
 });

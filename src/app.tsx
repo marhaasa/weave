@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useInput, useApp } from 'ink';
+import { useInput, useApp, useStdout } from 'ink';
 import { spawn } from 'child_process';
 import type { Key } from 'ink';
 
@@ -36,6 +36,7 @@ export const App: React.FC = () => {
   const fabricService = useFabricService(executeCommand);
 
   const { exit } = useApp();
+  const { stdout } = useStdout();
   const [showLoadingScreen, setShowLoadingScreen] = useState<boolean>(true);
 
   useEffect(() => {
@@ -468,8 +469,30 @@ export const App: React.FC = () => {
     if (input === 'q' && state.currentView === VIEWS.MAIN) exit();
   });
 
-  if (state.inInteractiveMode) return createBox({}, []);
-  if (showLoadingScreen) return h(LoadingScreen);
+  const terminalHeight = stdout?.rows || 24;
+  const terminalWidth = stdout?.columns || 80;
+
+  if (state.inInteractiveMode) return createBox(
+    { 
+      flexDirection: 'column',
+      width: terminalWidth,
+      minHeight: Math.max(terminalHeight, 10),
+      padding: 0
+    }, 
+    []
+  );
+  
+  if (showLoadingScreen) return createBox(
+    { 
+      flexDirection: 'column',
+      width: terminalWidth,
+      minHeight: Math.max(terminalHeight, 10),
+      padding: 0,
+      justifyContent: 'center',
+      alignItems: 'center'
+    }, 
+    [h(LoadingScreen)]
+  );
 
   const viewComponents: Record<string, () => React.ReactElement> = {
     [VIEWS.MAIN]: () => h(MainMenu, { selectedOption: state.selectedOption }),
@@ -478,14 +501,16 @@ export const App: React.FC = () => {
       selectedWorkspace: state.selectedWorkspace,
       loading: state.loading,
       error: state.error,
-      loadingProgress: state.loadingProgress
+      loadingProgress: state.loadingProgress,
+      terminalHeight
     }),
     [VIEWS.WORKSPACE_ITEMS]: () => h(WorkspaceItems, {
       items: state.workspaceItems,
       selectedItem: state.selectedWorkspaceItem,
       workspaceName: state.workspaces[state.selectedWorkspace],
       loading: state.loading,
-      error: state.error
+      error: state.error,
+      terminalHeight
     }),
     [VIEWS.COMMAND_HISTORY]: () => h(CommandHistory, { history: state.commandHistory }),
     [VIEWS.ITEM_ACTIONS]: () => h(ItemActionsMenu, {
@@ -514,5 +539,15 @@ export const App: React.FC = () => {
   };
 
   const Component = viewComponents[state.currentView] || viewComponents[VIEWS.MAIN];
-  return Component();
+  
+  return createBox(
+    { 
+      flexDirection: 'column',
+      width: terminalWidth,
+      minHeight: Math.max(terminalHeight, 10), // Ensure minimum height
+      padding: 0,
+      overflowY: 'hidden'
+    }, 
+    [Component()]
+  );
 };

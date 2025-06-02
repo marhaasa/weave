@@ -1,5 +1,5 @@
 import React, { ReactElement } from 'react';
-import { createBox, createText, spacer } from '../utils/uiHelpers.js';
+import { createFullWidthBox, createBox, createText, spacer } from '../utils/uiHelpers.js';
 import { HistoryManager } from '../services/history.js';
 import { COLORS, LIMITS } from '../constants/index.js';
 import type { HistoryEntry } from '../types/index.js';
@@ -50,5 +50,5 @@ export const CommandHistory: React.FC<CommandHistoryProps> = React.memo(({ histo
     }
   }
 
-  return createBox({ flexDirection: 'column', padding: 1 }, elements);
+  return createFullWidthBox({ padding: 1, alignItems: 'flex-start' }, elements);
 });

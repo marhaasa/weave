@@ -1,5 +1,5 @@
 import React, { ReactElement } from 'react';
-import { createBox, createText, spacer, createErrorDisplay } from '../utils/uiHelpers.js';
+import { createFullWidthBox, createText, spacer, createErrorDisplay } from '../utils/uiHelpers.js';
 import { COLORS } from '../constants/index.js';
 import type { JobInfo, ItemInfo } from '../types/index.js';
 
@@ -59,5 +59,12 @@ export const OutputView: React.FC<OutputViewProps> = React.memo(({
     elements.push(createText({ key: 'no-output', color: COLORS.WARNING }, 'No output received'));
   }
 
-  return createBox({ flexDirection: 'column', padding: 1, height: '100%', overflowY: 'hidden' }, elements);
+  return createFullWidthBox({ 
+    padding: 1, 
+    alignItems: 'flex-start',
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
+    overflowY: 'hidden'
+  }, elements);
 });

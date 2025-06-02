@@ -1,5 +1,5 @@
 import React, { ReactElement } from 'react';
-import { createBox, createText, createMenuItem, createLoadingDisplay, createErrorDisplay, spacer } from '../utils/uiHelpers.js';
+import { createFullWidthBox, createText, createMenuItem, createLoadingDisplay, createErrorDisplay, createPaginatedList, spacer } from '../utils/uiHelpers.js';
 import { ParsingUtils } from '../utils/parsing.js';
 import { COLORS } from '../constants/index.js';
 import type { WorkspaceItem } from '../types/index.js';
@@ -10,6 +10,7 @@ interface WorkspaceItemsProps {
   workspaceName: string;
   loading: boolean;
   error: string;
+  terminalHeight?: number;
 }
 
 export const WorkspaceItems: React.FC<WorkspaceItemsProps> = React.memo(({
@@ -17,7 +18,8 @@ export const WorkspaceItems: React.FC<WorkspaceItemsProps> = React.memo(({
   selectedItem,
   workspaceName,
   loading,
-  error
+  error,
+  terminalHeight = 24
 }) => {
   const elements: ReactElement[] = [
     createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, 'Workspace Items'),
@@ -48,7 +50,8 @@ export const WorkspaceItems: React.FC<WorkspaceItemsProps> = React.memo(({
       spacer('spacer2')
     );
 
-    items.forEach((item, index) => {
+    // Create a function to render an item with its icon
+    const renderItem = (item: string | WorkspaceItem, index: number, isSelected: boolean): ReactElement => {
       const itemObj = typeof item === 'string' ? {
         name: item,
         isNotebook: ParsingUtils.isNotebook(item),
@@ -61,15 +64,36 @@ export const WorkspaceItems: React.FC<WorkspaceItemsProps> = React.memo(({
       else if (itemObj.isDataPipeline) icon = ' 🔄';
       else if (itemObj.isSparkJobDefinition) icon = ' ⚡';
 
-      elements.push(
-        createMenuItem(
-          `${itemObj.name}${icon}`,
-          index,
-          selectedItem,
-          COLORS.WARNING_BG
-        )
+      return createMenuItem(
+        `${itemObj.name}${icon}`,
+        index,
+        isSelected ? index : -1,
+        COLORS.WARNING_BG
       );
-    });
+    };
+
+    // Calculate available space for list items
+    // Reserve space for: title (1) + spacer (1) + summary (1) + spacer (1) + separator (1) + return menu (1) + padding (2) = 8 lines
+    const reservedLines = 8;
+    const availableLines = Math.max(3, terminalHeight - reservedLines);
+    const maxVisibleItems = Math.min(availableLines, items.length);
+    
+    // Convert items to strings for pagination (we'll map back to original items)
+    const itemNames = items.map(item => typeof item === 'string' ? item : item.name);
+    
+    // If "Return to Workspaces" is selected, show the last items in the list
+    const effectiveSelectedIndex = selectedItem >= items.length 
+      ? items.length - 1 
+      : selectedItem;
+      
+    const paginatedItems = createPaginatedList(
+      itemNames,
+      effectiveSelectedIndex,
+      (itemName, index, isSelected) => renderItem(items[index], index, selectedItem === index),
+      maxVisibleItems
+    );
+    
+    elements.push(...paginatedItems);
 
     elements.push(
       spacer('separator'),
@@ -85,5 +109,12 @@ export const WorkspaceItems: React.FC<WorkspaceItemsProps> = React.memo(({
     );
   }
 
-  return createBox({ flexDirection: 'column', padding: 1 }, elements);
+  return createFullWidthBox({ 
+    padding: 1, 
+    alignItems: 'flex-start',
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
+    overflowY: 'hidden'
+  }, elements);
 });

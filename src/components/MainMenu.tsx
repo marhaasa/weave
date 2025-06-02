@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { AnimatedWeaveTitle } from './AnimatedWeaveTitle.js';
-import { createBox, createMenuItem, spacer, h } from '../utils/uiHelpers.js';
+import { createFullWidthBox, createMenuItem, spacer, h } from '../utils/uiHelpers.js';
 import { CommandBuilder } from '../utils/commandBuilder.js';
 import { VIEWS } from '../constants/index.js';
 
@@ -16,7 +16,11 @@ export const MainMenu: React.FC<MainMenuProps> = React.memo(({ selectedOption })
     { label: 'Exit', action: 'exit' }
   ], []);
 
-  return createBox({ flexDirection: 'column', padding: 1 }, [
+  return createFullWidthBox({ 
+    padding: 1, 
+    justifyContent: 'center',
+    alignItems: 'center'
+  }, [
     h(AnimatedWeaveTitle, { key: 'title' }),
     spacer(),
     ...menuOptions.map((option, index) =>
