@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+## 0.1.18 - 2025-06-02
+
+### Fixed
+- Reworked interactions with the fabric CLI to go through fabricService
+- Added run job, run sync job and view last job details for datapipelines and spark job definitions
+- Refactored from Notebook actions to item actions
+
+
 ## 0.1.17 - 2025-05-27
 
 ### Fixed
