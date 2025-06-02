@@ -5,7 +5,7 @@ export { JobStatusView } from './JobStatusView.js';
 export { LoadingOrError } from './LoadingOrError.js';
 export { LoadingScreen } from './LoadingScreen.js';
 export { MainMenu } from './MainMenu.js';
-export { NotebookActionsMenu } from './NotebookActionsMenu.js';
+export { ItemActionsMenu } from './ItemActionsMenu.js';
 export { OutputView } from './OutputView.js';
 export { WorkspaceItems } from './WorkspaceItems.js';
 export { WorkspacesList } from './WorkspacesList.js';

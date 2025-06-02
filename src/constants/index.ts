@@ -4,7 +4,7 @@ export const VIEWS = {
   MAIN: 'main',
   WORKSPACES: 'workspaces',
   WORKSPACE_ITEMS: 'workspace-items',
-  NOTEBOOK_ACTIONS: 'notebook-actions',
+  ITEM_ACTIONS: 'item-actions',
   OUTPUT: 'output',
   COMMAND_HISTORY: 'command-history',
   JOB_MENU: 'job-menu',

@@ -24,12 +24,17 @@ export interface HistoryEntry {
 export interface WorkspaceItem {
   name: string;
   isNotebook: boolean;
+  isDataPipeline?: boolean;
+  isSparkJobDefinition?: boolean;
 }
 
-export interface NotebookInfo {
+export interface ItemInfo {
   name: string;
   workspace: string;
 }
+
+// Keep for backward compatibility  
+export interface NotebookInfo extends ItemInfo {}
 
 export interface JobInfo {
   jobId: string;
@@ -67,8 +72,8 @@ export interface State {
   activeJobs: JobInfo[];
   currentJob: JobInfo | null;
   selectedJobOption: number;
-  selectedNotebookAction: number;
-  currentNotebook: NotebookInfo | null;
+  selectedItemAction: number;
+  currentItem: ItemInfo | null;
   completedJobs: Set<string>;
   cache: Map<string, CachedData>;
 }
@@ -118,8 +123,8 @@ export interface Actions {
   setConfig: (config: Config) => void;
   setCurrentJob: (job: JobInfo | null) => void;
   setSelectedJobOption: (option: number) => void;
-  setSelectedNotebookAction: (action: number) => void;
-  setCurrentNotebook: (notebook: NotebookInfo | null) => void;
+  setSelectedItemAction: (action: number) => void;
+  setCurrentItem: (item: ItemInfo | null) => void;
   addToHistory: (command: string, result: CommandResult) => Promise<void>;
   getCachedData: <T = any>(key: string) => T | null;
   setCachedData: <T = any>(key: string, data: T) => void;
@@ -132,7 +137,7 @@ export interface Handlers {
   handleMenuSelection: () => Promise<void>;
   handleWorkspaceSelection: () => Promise<void>;
   handleWorkspaceItemSelection: () => Promise<void>;
-  handleNotebookActionSelection: () => Promise<void>;
+  handleItemActionSelection: () => Promise<void>;
   handleJobMenuSelection: () => Promise<void>;
   checkJobStatus: () => Promise<void>;
   refreshWorkspaces: () => Promise<void>;

@@ -4,13 +4,13 @@ export const CommandBuilder = {
   listWorkspace: (workspace: string): string => `fab ls "${workspace}.Workspace"`,
 
   job: {
-    start: (workspace: string, notebook: string): string =>
-      `fab job start ${workspace}.Workspace/${notebook}`,
-    runSync: (workspace: string, notebook: string): string =>
-      `fab job run /${workspace}.Workspace/${notebook}`,
-    status: (workspace: string, notebook: string, jobId: string): string =>
-      `fab job run-status /${workspace}.Workspace/${notebook} --id ${jobId}`,
-    list: (workspace: string, notebook: string): string =>
-      `fab job run-list /${workspace}.Workspace/${notebook}`
+    start: (workspace: string, itemName: string): string =>
+      `fab job start ${workspace}.Workspace/${itemName}`,
+    runSync: (workspace: string, itemName: string): string =>
+      `fab job run /${workspace}.Workspace/${itemName}`,
+    status: (workspace: string, itemName: string, jobId: string): string =>
+      `fab job run-status /${workspace}.Workspace/${itemName} --id ${jobId}`,
+    list: (workspace: string, itemName: string): string =>
+      `fab job run-list /${workspace}.Workspace/${itemName}`
   }
 };

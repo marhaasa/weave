@@ -61,15 +61,15 @@ export const createInputHandlers = (
     }
   },
 
-  [VIEWS.NOTEBOOK_ACTIONS]: (input: string, key: Key) => {
-    handleNavigation(key, state.selectedNotebookAction, 3, actions.setSelectedNotebookAction);
+  [VIEWS.ITEM_ACTIONS]: (input: string, key: Key) => {
+    handleNavigation(key, state.selectedItemAction, 3, actions.setSelectedItemAction);
 
-    if (key.return) handlers.handleNotebookActionSelection();
+    if (key.return) handlers.handleItemActionSelection();
     else if (key.escape || input === 'q') {
       actions.updateState({
         currentView: VIEWS.WORKSPACE_ITEMS,
-        selectedNotebookAction: 0,
-        currentNotebook: null
+        selectedItemAction: 0,
+        currentItem: null
       });
     }
   },
@@ -106,8 +106,8 @@ export const createInputHandlers = (
 
   [VIEWS.OUTPUT]: (input: string, key: Key) => {
     if (key.escape || input === 'q') {
-      if (state.currentNotebook) {
-        actions.setCurrentView(VIEWS.NOTEBOOK_ACTIONS);
+      if (state.currentItem) {
+        actions.setCurrentView(VIEWS.ITEM_ACTIONS);
       } else {
         actions.setCurrentView(VIEWS.MAIN);
         actions.resetState();

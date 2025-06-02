@@ -29,8 +29,8 @@ export class FabricService {
     return ParsingUtils.parseWorkspaceItems(result.output);
   }
 
-  async startJob(workspace: string, notebook: string): Promise<JobInfo> {
-    const command = CommandBuilder.job.start(workspace, notebook);
+  async startJob(workspace: string, itemName: string): Promise<JobInfo> {
+    const command = CommandBuilder.job.start(workspace, itemName);
     const result = await this.executeCommand(command, { silent: true });
 
     if (!result.success) {
@@ -45,18 +45,18 @@ export class FabricService {
     return {
       jobId,
       workspace,
-      notebook,
+      notebook: itemName, // Keep for compatibility
       startTime: Date.now()
     };
   }
 
-  async runJobSync(workspace: string, notebook: string): Promise<CommandResult> {
-    const command = CommandBuilder.job.runSync(workspace, notebook);
+  async runJobSync(workspace: string, itemName: string): Promise<CommandResult> {
+    const command = CommandBuilder.job.runSync(workspace, itemName);
     return await this.executeCommand(command, { timeout: 600000 }); // 10 minutes
   }
 
-  async getJobStatus(workspace: string, notebook: string, jobId: string): Promise<StatusInfo> {
-    const command = CommandBuilder.job.status(workspace, notebook, jobId);
+  async getJobStatus(workspace: string, itemName: string, jobId: string): Promise<StatusInfo> {
+    const command = CommandBuilder.job.status(workspace, itemName, jobId);
     const result = await this.executeCommand(command, { skipCache: true });
 
     if (!result.success) {
@@ -66,8 +66,8 @@ export class FabricService {
     return ParsingUtils.parseJobStatus(result.output);
   }
 
-  async getJobList(workspace: string, notebook: string): Promise<string | null> {
-    const command = CommandBuilder.job.list(workspace, notebook);
+  async getJobList(workspace: string, itemName: string): Promise<string | null> {
+    const command = CommandBuilder.job.list(workspace, itemName);
     const result = await this.executeCommand(command, { skipCache: true, silent: true });
 
     if (!result.success) {

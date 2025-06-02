@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import type { State, Actions, CommandResult, HistoryEntry, Config, JobInfo, NotebookInfo, WorkspaceItem, CachedData } from '../types/index.js';
+import type { State, Actions, CommandResult, HistoryEntry, Config, JobInfo, ItemInfo, WorkspaceItem, CachedData } from '../types/index.js';
 import { VIEWS, LIMITS } from '../constants/index.js';
 import { loadConfig } from '../services/config.js';
 import { HistoryManager } from '../services/history.js';
@@ -21,8 +21,8 @@ const createInitialState = (): State => ({
   activeJobs: [],
   currentJob: null,
   selectedJobOption: 0,
-  selectedNotebookAction: 0,
-  currentNotebook: null,
+  selectedItemAction: 0,
+  currentItem: null,
   completedJobs: new Set(),
   cache: new Map()
 });
@@ -65,8 +65,8 @@ export const useWeaveState = (): { state: State; actions: Actions } => {
     setConfig: (config: Config) => setState(prev => ({ ...prev, config })),
     setCurrentJob: (job: JobInfo | null) => setState(prev => ({ ...prev, currentJob: job })),
     setSelectedJobOption: (option: number) => setState(prev => ({ ...prev, selectedJobOption: option })),
-    setSelectedNotebookAction: (action: number) => setState(prev => ({ ...prev, selectedNotebookAction: action })),
-    setCurrentNotebook: (notebook: NotebookInfo | null) => setState(prev => ({ ...prev, currentNotebook: notebook })),
+    setSelectedItemAction: (action: number) => setState(prev => ({ ...prev, selectedItemAction: action })),
+    setCurrentItem: (item: ItemInfo | null) => setState(prev => ({ ...prev, currentItem: item })),
 
     addToHistory: async (command: string, result: CommandResult) => {
       const entry = HistoryManager.createEntry(command, result);

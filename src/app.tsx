@@ -17,7 +17,7 @@ import { MainMenu } from './components/MainMenu.js';
 import { WorkspacesList } from './components/WorkspacesList.js';
 import { WorkspaceItems } from './components/WorkspaceItems.js';
 import { CommandHistory } from './components/CommandHistory.js';
-import { NotebookActionsMenu } from './components/NotebookActionsMenu.js';
+import { ItemActionsMenu } from './components/ItemActionsMenu.js';
 import { JobMenu } from './components/JobMenu.js';
 import { JobStatusView } from './components/JobStatusView.js';
 import { OutputView } from './components/OutputView.js';
@@ -143,22 +143,22 @@ export const App: React.FC = () => {
         const selectedWorkspaceName = state.workspaces[state.selectedWorkspace];
 
         const itemName = typeof selectedItem === 'string' ? selectedItem : selectedItem.name;
-        const isNotebook = ParsingUtils.isNotebook(selectedItem);
+        const supportsJobActions = ParsingUtils.supportsJobActions(selectedItem);
 
-        if (isNotebook) {
+        if (supportsJobActions) {
           actions.updateState({
-            currentNotebook: { name: itemName, workspace: selectedWorkspaceName },
-            selectedNotebookAction: 0,
-            currentView: VIEWS.NOTEBOOK_ACTIONS
+            currentItem: { name: itemName, workspace: selectedWorkspaceName },
+            selectedItemAction: 0,
+            currentView: VIEWS.ITEM_ACTIONS
           });
         } else {
-          actions.setError(`Selected item "${itemName}" is not a notebook. Only .Notebook items can be started.`);
+          actions.setError(`Selected item "${itemName}" does not support job actions. Only .Notebook, .Pipeline, and .SparkJobDefinition items can be run.`);
           actions.setCurrentView(VIEWS.OUTPUT);
         }
     }, [state.workspaceItems, state.selectedWorkspaceItem, state.workspaces, state.selectedWorkspace, actions]);
 
-  const handleNotebookActionSelection = useCallback(async () => {
-        if (!state.currentNotebook) return;
+  const handleItemActionSelection = useCallback(async () => {
+        if (!state.currentItem) return;
 
         const actionHandlers: Record<number, () => Promise<void> | void> = {
           0: async () => {
@@ -167,8 +167,8 @@ export const App: React.FC = () => {
 
             try {
               const job = await fabricService.startJob(
-                state.currentNotebook!.workspace,
-                state.currentNotebook!.name
+                state.currentItem!.workspace,
+                state.currentItem!.name
               );
 
               actions.addActiveJob(job.jobId, job.workspace, job.notebook);
@@ -189,20 +189,83 @@ export const App: React.FC = () => {
 
             try {
               const result = await executeCommandWithStatusUpdates(
-                CommandBuilder.job.runSync(state.currentNotebook!.workspace, state.currentNotebook!.name),
+                CommandBuilder.job.runSync(state.currentItem!.workspace, state.currentItem!.name),
                 { timeout: TIMEOUTS.JOB_RUN }
               );
 
               if (result.success) {
-                actions.markJobCompleted(state.currentNotebook!.workspace, state.currentNotebook!.name);
-                actions.setOutput(
-                  `✅ Job completed successfully (${result.duration}s)\n\n` +
-                  `💡 Press 'q' or ESC to return to notebook actions menu`
-                );
+                // Check the actual job status to determine if it truly succeeded
+                actions.setOutput('🔍 Verifying job status...\n');
+                
+                try {
+                  const jobId = await fabricService.getJobList(
+                    state.currentItem!.workspace,
+                    state.currentItem!.name
+                  );
+                  
+                  if (jobId) {
+                    const statusInfo = await fabricService.getJobStatus(
+                      state.currentItem!.workspace,
+                      state.currentItem!.name,
+                      jobId
+                    );
+                    
+                    actions.markJobCompleted(state.currentItem!.workspace, state.currentItem!.name);
+                    
+                    // Calculate actual job duration from start/end times if available
+                    let actualDuration = result.duration;
+                    if (statusInfo.startTime && statusInfo.endTime) {
+                      const startTime = new Date(statusInfo.startTime).getTime();
+                      const endTime = new Date(statusInfo.endTime).getTime();
+                      actualDuration = Math.round((endTime - startTime) / 1000);
+                    }
+                    
+                    if (statusInfo.status === 'Completed' || statusInfo.status === 'Succeeded') {
+                      actions.setOutput(
+                        `✅ Job completed successfully (${actualDuration}s)\n\n` +
+                        `📋 Status: ${statusInfo.status}\n` +
+                        `🚀 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}\n` +
+                        `🏁 End Time: ${ParsingUtils.formatDateTime(statusInfo.endTime)}\n\n` +
+                        `💡 Press 'q' or ESC to return to actions menu`
+                      );
+                    } else if (statusInfo.status === 'Failed') {
+                      actions.setOutput(
+                        `❌ Job failed (${actualDuration}s)\n\n` +
+                        `📋 Status: ${statusInfo.status}\n` +
+                        `🚀 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}\n` +
+                        `🏁 End Time: ${statusInfo.endTime ? ParsingUtils.formatDateTime(statusInfo.endTime) : 'N/A'}\n\n` +
+                        `💡 Press 'q' or ESC to return to actions menu`
+                      );
+                    } else {
+                      actions.setOutput(
+                        `⚠️ Job execution completed but final status is unclear\n\n` +
+                        `📋 Status: ${statusInfo.status}\n` +
+                        `🚀 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}\n` +
+                        `🏁 End Time: ${statusInfo.endTime ? ParsingUtils.formatDateTime(statusInfo.endTime) : 'Still running...'}\n\n` +
+                        `💡 Use 'View Last Job Details' to check the actual status\n\n` +
+                        `💡 Press 'q' or ESC to return to actions menu`
+                      );
+                    }
+                  } else {
+                    actions.markJobCompleted(state.currentItem!.workspace, state.currentItem!.name);
+                    actions.setOutput(
+                      `⚠️ Job execution completed (${result.duration}s) but status could not be verified\n\n` +
+                      `💡 Use 'View Last Job Details' to check the actual status\n\n` +
+                      `💡 Press 'q' or ESC to return to actions menu`
+                    );
+                  }
+                } catch (statusError: any) {
+                  actions.markJobCompleted(state.currentItem!.workspace, state.currentItem!.name);
+                  actions.setOutput(
+                    `⚠️ Job execution completed (${result.duration}s) but status check failed: ${statusError.message}\n\n` +
+                    `💡 Use 'View Last Job Details' to check the actual status\n\n` +
+                    `💡 Press 'q' or ESC to return to actions menu`
+                  );
+                }
               }
             } catch (error: any) {
-              actions.markJobCompleted(state.currentNotebook!.workspace, state.currentNotebook!.name);
-              actions.setOutput(`❌ Job failed: ${error.message}\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
+              actions.markJobCompleted(state.currentItem!.workspace, state.currentItem!.name);
+              actions.setOutput(`❌ Job failed: ${error.message}\n\n💡 Press 'q' or ESC to return to item actions menu`);
             }
           },
 
@@ -212,14 +275,14 @@ export const App: React.FC = () => {
 
             try {
               const jobId = await fabricService.getJobList(
-                state.currentNotebook!.workspace,
-                state.currentNotebook!.name
+                state.currentItem!.workspace,
+                state.currentItem!.name
               );
 
               if (jobId) {
                 const statusInfo = await fabricService.getJobStatus(
-                  state.currentNotebook!.workspace,
-                  state.currentNotebook!.name,
+                  state.currentItem!.workspace,
+                  state.currentItem!.name,
                   jobId
                 );
 
@@ -229,28 +292,28 @@ export const App: React.FC = () => {
                   `📋 Status: ${statusInfo.status}\n` +
                   `🚀 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}\n` +
                   `🏁 End Time: ${statusInfo.endTime ? ParsingUtils.formatDateTime(statusInfo.endTime) : 'Still running...'}\n\n` +
-                  `💡 Press 'q' or ESC to return to notebook actions menu`
+                  `💡 Press 'q' or ESC to return to item actions menu`
                 );
               } else {
-                actions.setOutput(`ℹ️ No job history found for this notebook\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
+                actions.setOutput(`ℹ️ No job history found for this item\n\n💡 Press 'q' or ESC to return to item actions menu`);
               }
             } catch (error: any) {
-              actions.setOutput(`❌ Failed to get job details: ${error.message}\n\n💡 Press 'q' or ESC to return to notebook actions menu`);
+              actions.setOutput(`❌ Failed to get job details: ${error.message}\n\n💡 Press 'q' or ESC to return to item actions menu`);
             }
           },
 
           3: () => {
             actions.updateState({
               currentView: VIEWS.WORKSPACE_ITEMS,
-              selectedNotebookAction: 0,
-              currentNotebook: null
+              selectedItemAction: 0,
+              currentItem: null
             });
           }
         };
 
-        const handler = actionHandlers[state.selectedNotebookAction];
+        const handler = actionHandlers[state.selectedItemAction];
         if (handler) await handler();
-      }, [state.currentNotebook, state.selectedNotebookAction, actions, fabricService, executeCommandWithStatusUpdates]);
+      }, [state.currentItem, state.selectedItemAction, actions, fabricService, executeCommandWithStatusUpdates]);
 
   const checkJobStatus = useCallback(async () => {
       if (!state.currentJob) return;
@@ -287,10 +350,70 @@ export const App: React.FC = () => {
           try {
             const result = await executeCommandWithStatusUpdates(command, { timeout: TIMEOUTS.JOB_RUN });
             if (result.success) {
-              actions.setOutput(
-                `✅ Job completed successfully (${result.duration}s)\n\n` +
-                `💡 Press 'q' or ESC to return to main menu`
-              );
+              // Check the actual job status to determine if it truly succeeded
+              actions.setOutput('🔍 Verifying job status...\n');
+              
+              try {
+                const jobId = await fabricService.getJobList(
+                  state.currentJob!.workspace,
+                  state.currentJob!.notebook
+                );
+                
+                if (jobId) {
+                  const statusInfo = await fabricService.getJobStatus(
+                    state.currentJob!.workspace,
+                    state.currentJob!.notebook,
+                    jobId
+                  );
+                  
+                  // Calculate actual job duration from start/end times if available
+                  let actualDuration = result.duration;
+                  if (statusInfo.startTime && statusInfo.endTime) {
+                    const startTime = new Date(statusInfo.startTime).getTime();
+                    const endTime = new Date(statusInfo.endTime).getTime();
+                    actualDuration = Math.round((endTime - startTime) / 1000);
+                  }
+                  
+                  if (statusInfo.status === 'Completed' || statusInfo.status === 'Succeeded') {
+                    actions.setOutput(
+                      `✅ Job completed successfully (${actualDuration}s)\n\n` +
+                      `📋 Status: ${statusInfo.status}\n` +
+                      `🚀 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}\n` +
+                      `🏁 End Time: ${ParsingUtils.formatDateTime(statusInfo.endTime)}\n\n` +
+                      `💡 Press 'q' or ESC to return to main menu`
+                    );
+                  } else if (statusInfo.status === 'Failed') {
+                    actions.setOutput(
+                      `❌ Job failed (${actualDuration}s)\n\n` +
+                      `📋 Status: ${statusInfo.status}\n` +
+                      `🚀 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}\n` +
+                      `🏁 End Time: ${statusInfo.endTime ? ParsingUtils.formatDateTime(statusInfo.endTime) : 'N/A'}\n\n` +
+                      `💡 Press 'q' or ESC to return to main menu`
+                    );
+                  } else {
+                    actions.setOutput(
+                      `⚠️ Job execution completed but final status is unclear\n\n` +
+                      `📋 Status: ${statusInfo.status}\n` +
+                      `🚀 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}\n` +
+                      `🏁 End Time: ${statusInfo.endTime ? ParsingUtils.formatDateTime(statusInfo.endTime) : 'Still running...'}\n\n` +
+                      `💡 Use 'View Last Job Details' to check the actual status\n\n` +
+                      `💡 Press 'q' or ESC to return to main menu`
+                    );
+                  }
+                } else {
+                  actions.setOutput(
+                    `⚠️ Job execution completed (${result.duration}s) but status could not be verified\n\n` +
+                    `💡 Use 'View Last Job Details' to check the actual status\n\n` +
+                    `💡 Press 'q' or ESC to return to main menu`
+                  );
+                }
+              } catch (statusError: any) {
+                actions.setOutput(
+                  `⚠️ Job execution completed (${result.duration}s) but status check failed: ${statusError.message}\n\n` +
+                  `💡 Use 'View Last Job Details' to check the actual status\n\n` +
+                  `💡 Press 'q' or ESC to return to main menu`
+                );
+              }
             }
           } catch (error: any) {
             actions.setOutput(`❌ Job failed: ${error.message}\n\n💡 Press 'q' or ESC to return to main menu`);
@@ -322,7 +445,7 @@ export const App: React.FC = () => {
     handleMenuSelection,
     handleWorkspaceSelection,
     handleWorkspaceItemSelection,
-    handleNotebookActionSelection,
+    handleItemActionSelection,
     handleJobMenuSelection,
     checkJobStatus,
     refreshWorkspaces
@@ -330,7 +453,7 @@ export const App: React.FC = () => {
     handleMenuSelection,
     handleWorkspaceSelection,
     handleWorkspaceItemSelection,
-    handleNotebookActionSelection,
+    handleItemActionSelection,
     handleJobMenuSelection,
     checkJobStatus,
     refreshWorkspaces
@@ -365,13 +488,10 @@ export const App: React.FC = () => {
       error: state.error
     }),
     [VIEWS.COMMAND_HISTORY]: () => h(CommandHistory, { history: state.commandHistory }),
-    [VIEWS.NOTEBOOK_ACTIONS]: () => h(NotebookActionsMenu, {
-      notebook: state.currentNotebook?.name || '',
-      workspace: state.currentNotebook?.workspace || '',
-      selectedOption: state.selectedNotebookAction,
-      completedJobs: state.completedJobs,
-      activeJobs: state.activeJobs,
-      currentJob: state.currentJob
+    [VIEWS.ITEM_ACTIONS]: () => h(ItemActionsMenu, {
+      itemName: state.currentItem?.name || '',
+      workspace: state.currentItem?.workspace || '',
+      selectedOption: state.selectedItemAction
     }),
     [VIEWS.JOB_MENU]: () => h(JobMenu, {
       job: state.currentJob!,
@@ -387,9 +507,9 @@ export const App: React.FC = () => {
       output: state.output,
       error: state.error,
       loading: state.loading,
-      title: state.currentNotebook ? 'Job Output' : menuOptions[state.selectedOption]?.label,
+      title: state.currentItem ? 'Job Output' : menuOptions[state.selectedOption]?.label,
       activeJobs: state.activeJobs,
-      currentNotebook: state.currentNotebook
+      currentItem: state.currentItem
     })
   };
 

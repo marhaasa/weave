@@ -1,7 +1,7 @@
 import React, { ReactElement } from 'react';
 import { createBox, createText, spacer, createErrorDisplay } from '../utils/uiHelpers.js';
 import { COLORS } from '../constants/index.js';
-import type { JobInfo, NotebookInfo } from '../types/index.js';
+import type { JobInfo, ItemInfo } from '../types/index.js';
 
 interface OutputViewProps {
   output: string;
@@ -9,7 +9,7 @@ interface OutputViewProps {
   loading: boolean;
   title?: string;
   activeJobs: JobInfo[];
-  currentNotebook: NotebookInfo | null;
+  currentItem: ItemInfo | null;
 }
 
 export const OutputView: React.FC<OutputViewProps> = React.memo(({
@@ -18,7 +18,7 @@ export const OutputView: React.FC<OutputViewProps> = React.memo(({
   loading,
   title,
   activeJobs,
-  currentNotebook
+  currentItem
 }) => {
   const elements: ReactElement[] = [];
 

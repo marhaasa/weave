@@ -41,7 +41,9 @@ export const ParsingUtils = {
       .filter(item => item && item.length > 0)
       .map(item => ({
         name: item.trim(),
-        isNotebook: item.endsWith('.Notebook')
+        isNotebook: item.endsWith('.Notebook'),
+        isDataPipeline: item.endsWith('.DataPipeline'),
+        isSparkJobDefinition: item.endsWith('.SparkJobDefinition')
       }));
   },
 
@@ -75,7 +77,7 @@ export const ParsingUtils = {
           statusInfo.status = statusMatch[1];
         }
 
-        const jobTypeMatch = cleanLine.match(/\b(RunNotebook|RunPipeline)\b/i);
+        const jobTypeMatch = cleanLine.match(/\b(RunNotebook|RunPipeline|RunDataPipeline|RunSparkJobDefinition)\b/i);
         if (jobTypeMatch) {
           statusInfo.jobType = jobTypeMatch[1];
         }
@@ -132,5 +134,17 @@ export const ParsingUtils = {
 
   isNotebook: (item: string | WorkspaceItem): boolean => {
     return typeof item === 'string' ? item.endsWith('.Notebook') : item.isNotebook;
+  },
+
+  isDataPipeline: (item: string | WorkspaceItem): boolean => {
+    return typeof item === 'string' ? item.endsWith('.DataPipeline') : (item as any).isDataPipeline || false;
+  },
+
+  isSparkJobDefinition: (item: string | WorkspaceItem): boolean => {
+    return typeof item === 'string' ? item.endsWith('.SparkJobDefinition') : (item as any).isSparkJobDefinition || false;
+  },
+
+  supportsJobActions: (item: string | WorkspaceItem): boolean => {
+    return ParsingUtils.isNotebook(item) || ParsingUtils.isDataPipeline(item) || ParsingUtils.isSparkJobDefinition(item);
   }
 };

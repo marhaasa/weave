@@ -36,20 +36,34 @@ export const WorkspaceItems: React.FC<WorkspaceItemsProps> = React.memo(({
     );
   } else if (items.length > 0) {
     const notebooks = items.filter(item => ParsingUtils.isNotebook(item));
-    const others = items.filter(item => !ParsingUtils.isNotebook(item));
+    const dataPipelines = items.filter(item => ParsingUtils.isDataPipeline(item));
+    const sparkJobs = items.filter(item => ParsingUtils.isSparkJobDefinition(item));
+    const others = items.filter(item => !ParsingUtils.supportsJobActions(item));
 
+    const jobItemsCount = notebooks.length + dataPipelines.length + sparkJobs.length;
     elements.push(
       createText({ key: 'items-summary', color: COLORS.SECONDARY },
-        `${notebooks.length} notebook${notebooks.length === 1 ? '' : 's'}, ${others.length} other item${others.length === 1 ? '' : 's'}`
+        `${jobItemsCount} job-enabled item${jobItemsCount === 1 ? '' : 's'}, ${others.length} other item${others.length === 1 ? '' : 's'}`
       ),
       spacer('spacer2')
     );
 
     items.forEach((item, index) => {
-      const itemObj = typeof item === 'string' ? { name: item, isNotebook: ParsingUtils.isNotebook(item) } : item;
+      const itemObj = typeof item === 'string' ? {
+        name: item,
+        isNotebook: ParsingUtils.isNotebook(item),
+        isDataPipeline: ParsingUtils.isDataPipeline(item),
+        isSparkJobDefinition: ParsingUtils.isSparkJobDefinition(item)
+      } : item;
+
+      let icon = '';
+      if (itemObj.isNotebook) icon = ' 📓';
+      else if (itemObj.isDataPipeline) icon = ' 🔄';
+      else if (itemObj.isSparkJobDefinition) icon = ' ⚡';
+
       elements.push(
         createMenuItem(
-          `${itemObj.name}${itemObj.isNotebook ? ' 📓' : ''}`,
+          `${itemObj.name}${icon}`,
           index,
           selectedItem,
           COLORS.WARNING_BG

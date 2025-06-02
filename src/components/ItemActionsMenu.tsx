@@ -1,33 +1,40 @@
 import React, { ReactElement } from 'react';
 import { createBox, createText, createMenuItem, spacer } from '../utils/uiHelpers.js';
 import { COLORS } from '../constants/index.js';
-import type { JobInfo } from '../types/index.js';
+import { ParsingUtils } from '../utils/parsing.js';
 
-interface NotebookActionsMenuProps {
-  notebook: string;
+interface ItemActionsMenuProps {
+  itemName: string;
   workspace: string;
   selectedOption: number;
-  completedJobs: Set<string>;
-  activeJobs: JobInfo[];
-  currentJob: JobInfo | null;
 }
 
-export const NotebookActionsMenu: React.FC<NotebookActionsMenuProps> = React.memo(({
-  notebook,
+export const ItemActionsMenu: React.FC<ItemActionsMenuProps> = React.memo(({
+  itemName,
   workspace,
-  selectedOption,
-  completedJobs,
-  activeJobs,
-  currentJob
+  selectedOption
 }) => {
-  const jobKey = `${workspace}/${notebook}`;
-  const hasJobCompleted = completedJobs && completedJobs.has(jobKey);
+
+  // Determine item type and appropriate icon/title
+  const isNotebook = ParsingUtils.isNotebook(itemName);
+  const isDataPipeline = ParsingUtils.isDataPipeline(itemName);
+  const isSparkJobDefinition = ParsingUtils.isSparkJobDefinition(itemName);
+
+  let icon = '📓';
+  let title = 'Notebook Actions';
+
+  if (isDataPipeline) {
+    icon = '🔄';
+    title = 'Pipeline Actions';
+  } else if (isSparkJobDefinition) {
+    icon = '⚡';
+    title = 'Spark Job Definition Actions';
+  }
 
   const elements: ReactElement[] = [
-    createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, 'Notebook Actions'),
+    createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, title),
     spacer('spacer1'),
-    createText({ key: 'notebook-info', color: COLORS.PRIMARY }, `📓 ${notebook}`),
-    ...(hasJobCompleted ? [createText({ key: 'job-status', color: COLORS.SUCCESS }, `✅ Job has been run and completed`)] : []),
+    createText({ key: 'item-info', color: COLORS.PRIMARY }, `${icon} ${itemName}`),
     spacer('spacer2'),
     createText({ key: 'menu-title', color: COLORS.PRIMARY, bold: true }, 'What would you like to do?'),
     spacer('spacer3')
