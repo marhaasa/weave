@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+## 0.1.19 - 2025-06-09
+
+### Fixed
+- Added "fab mv" functionality to move items between workspaces
+- Fixed skeleton loading bars for workspaces and workspace items
+- Added job polling
+- Added debounced navigation
+
+
 ## 0.1.18 - 2025-06-02
 
 ### Fixed
