@@ -76,6 +76,7 @@ export interface State {
   currentItem: ItemInfo | null;
   completedJobs: Set<string>;
   cache: Map<string, CachedData>;
+  selectedDestinationWorkspace: number;
 }
 
 export interface ExecuteCommandOptions {
@@ -131,6 +132,7 @@ export interface Actions {
   addActiveJob: (jobId: string, workspace: string, notebook: string) => void;
   markJobCompleted: (workspace: string, notebook: string) => void;
   setCommandHistory: (history: HistoryEntry[]) => void;
+  setSelectedDestinationWorkspace: (index: number) => void;
 }
 
 export interface Handlers {
@@ -141,6 +143,7 @@ export interface Handlers {
   handleJobMenuSelection: () => Promise<void>;
   checkJobStatus: () => Promise<void>;
   refreshWorkspaces: () => Promise<void>;
+  handleDestinationWorkspaceSelection: () => Promise<void>;
 }
 
 export type ViewType = string;

@@ -24,7 +24,8 @@ const createInitialState = (): State => ({
   selectedItemAction: 0,
   currentItem: null,
   completedJobs: new Set(),
-  cache: new Map()
+  cache: new Map(),
+  selectedDestinationWorkspace: 0
 });
 
 export const useWeaveState = (): { state: State; actions: Actions } => {
@@ -109,7 +110,8 @@ export const useWeaveState = (): { state: State; actions: Actions } => {
       }));
     },
 
-    setCommandHistory: (history: HistoryEntry[]) => setState(prev => ({ ...prev, commandHistory: history }))
+    setCommandHistory: (history: HistoryEntry[]) => setState(prev => ({ ...prev, commandHistory: history })),
+    setSelectedDestinationWorkspace: (index: number) => setState(prev => ({ ...prev, selectedDestinationWorkspace: index }))
   }), [state.cache, state.config]);
 
   return { state, actions };

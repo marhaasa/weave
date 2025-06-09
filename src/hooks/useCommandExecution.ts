@@ -69,11 +69,28 @@ export const useCommandExecution = (actions: Actions, config: Config | null) => 
 
       return result;
     } catch (err: any) {
-      const error = err.name === 'AbortError'
-        ? 'Command timed out. Try again or check your connection.'
-        : `Error executing command: ${err.message}`;
+      if (err.name === 'AbortError') {
+        const error = 'Command timed out. Try again or check your connection.';
+        const result: CommandResult = { success: false, error, command, output: '' };
+        if (!options.silent) {
+          actions.setError(error);
+        }
+        actions.setLoadingProgress(100);
+        await actions.addToHistory(command, result);
+        return result;
+      }
 
-      const result: CommandResult = { success: false, error, command, output: '' };
+      // For command execution errors, try to extract stderr from the exception
+      const stderr = err.stderr || err.stdout || '';
+      const error = stderr.trim() || `Error executing command: ${err.message}`;
+
+      const result: CommandResult = { 
+        success: false, 
+        error, 
+        command, 
+        output: err.stdout || '' 
+      };
+      
       if (!options.silent) {
         actions.setError(error);
       }
@@ -157,7 +174,8 @@ export const useCommandExecution = (actions: Actions, config: Config | null) => 
             const cleanLine = line.trim();
             if (cleanLine) {
               const elapsed = Math.floor((Date.now() - startTime) / 1000);
-              actions.setOutput(`✅ Job completed (${elapsed}s)`);
+              // Don't set output here - let the calling function handle the final message
+              // actions.setOutput(`✅ Job completed (${elapsed}s)`);
             }
           }
         }
@@ -183,6 +201,7 @@ export const useCommandExecution = (actions: Actions, config: Config | null) => 
         await actions.addToHistory(command, result);
 
         if (code === 0) {
+          // Don't automatically set output here - let the calling function handle it
           resolve(result);
         } else {
           reject(new Error(error || `Command exited with code ${code}`));

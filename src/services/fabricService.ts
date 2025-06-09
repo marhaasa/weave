@@ -15,16 +15,13 @@ export class FabricService {
   }
 
   private getCachedData<T>(key: string): T | null {
-    const cached = this.cache.get(key);
-    if (cached && Date.now() - cached.timestamp < this.CACHE_DURATION) {
-      return cached.data as T;
-    }
-    this.cache.delete(key); // Clean up expired cache
+    // Disable caching - always return null to force fresh fetches
     return null;
   }
 
   private setCachedData<T>(key: string, data: T): void {
-    this.cache.set(key, { data, timestamp: Date.now() });
+    // Disable caching - don't store anything
+    // this.cache.set(key, { data, timestamp: Date.now() });
   }
 
   public invalidateCache(pattern?: string): void {
@@ -144,5 +141,27 @@ export class FabricService {
     const jobId = ParsingUtils.extractGuid(result.output);
     this.setCachedData(cacheKey, jobId);
     return jobId;
+  }
+
+  async moveItem(fromWorkspace: string, toWorkspace: string, itemName: string): Promise<CommandResult> {
+    const command = CommandBuilder.moveItem(fromWorkspace, toWorkspace, itemName);
+    const result = await this.executeCommand(command, { silent: true });
+
+    if (!result.success) {
+      const errorInfo = result.error || result.output || 'Unknown error';
+      
+      // Check if this is a cooldown error and include the stderr details
+      if (result.error && (
+          result.error.includes('ItemDisplayNameNotAvailableYet') || 
+          result.error.includes('not available yet') ||
+          result.error.includes('is expected to become available')
+      )) {
+        throw new Error(`Failed to move item: ${result.error}`);
+      } else {
+        throw new Error(`Failed to move item: ${errorInfo}`);
+      }
+    }
+
+    return result;
   }
 }

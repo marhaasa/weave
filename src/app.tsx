@@ -23,6 +23,7 @@ import { ItemActionsMenu } from './components/ItemActionsMenu.js';
 import { JobMenu } from './components/JobMenu.js';
 import { JobStatusView } from './components/JobStatusView.js';
 import { OutputView } from './components/OutputView.js';
+import { WorkspaceSelection } from './components/WorkspaceSelection.js';
 
 // Utils and Constants
 import { h, createBox } from './utils/uiHelpers.js';
@@ -145,14 +146,44 @@ export const App: React.FC = () => {
         actions.updateState({
           currentView: VIEWS.WORKSPACE_ITEMS,
           workspaceItems: [],
-          selectedWorkspaceItem: 0
+          selectedWorkspaceItem: 0,
+          loading: false, // Don't show loading immediately
+          error: '' // Clear any lingering error state
         });
+
+        // Only show loading if the operation takes longer than 200ms
+        const loadingTimer = setTimeout(() => {
+          actions.setLoading(true);
+          
+          // Start a timer to update loading progress for skeleton animation
+          const progressTimer = setInterval(() => {
+            actions.setLoadingProgress((prev: number) => (prev + 10) % 100);
+          }, 300);
+          
+          // Store the progress timer for cleanup
+          (loadingTimer as any).progressTimer = progressTimer;
+        }, 200);
 
         try {
           const items = await fabricService.listWorkspaceItems(selectedWorkspaceName);
-          actions.setWorkspaceItems(items);
+          clearTimeout(loadingTimer);
+          if ((loadingTimer as any).progressTimer) {
+            clearInterval((loadingTimer as any).progressTimer);
+          }
+          // Set items and loading state atomically to prevent flicker
+          actions.updateState({
+            workspaceItems: items,
+            loading: false,
+            loadingProgress: 0
+          });
         } catch (error: any) {
+          clearTimeout(loadingTimer);
+          if ((loadingTimer as any).progressTimer) {
+            clearInterval((loadingTimer as any).progressTimer);
+          }
           actions.setError(error.message);
+          actions.setLoading(false);
+          actions.setLoadingProgress(0);
           actions.setCurrentView(VIEWS.WORKSPACES);
         }
     }, [state.workspaces, state.selectedWorkspace, actions, fabricService]);
@@ -241,32 +272,36 @@ export const App: React.FC = () => {
                       actualDuration = Math.round((endTime - startTime) / 1000);
                     }
                     
+                    // Build the complete message first to avoid multiple output updates
+                    let finalMessage: string;
                     if (statusInfo.status === 'Completed' || statusInfo.status === 'Succeeded') {
-                      actions.setOutput(
+                      finalMessage = 
                         `✅ Job completed successfully (${actualDuration}s)\n\n` +
                         `📋 Status: ${statusInfo.status}\n` +
                         `🚀 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}\n` +
                         `🏁 End Time: ${ParsingUtils.formatDateTime(statusInfo.endTime)}\n\n` +
-                        `💡 Press 'q' or ESC to return to actions menu`
-                      );
+                        `💡 Press 'q' or ESC to return to actions menu`;
                     } else if (statusInfo.status === 'Failed') {
-                      actions.setOutput(
+                      finalMessage = 
                         `❌ Job failed (${actualDuration}s)\n\n` +
                         `📋 Status: ${statusInfo.status}\n` +
                         `🚀 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}\n` +
                         `🏁 End Time: ${statusInfo.endTime ? ParsingUtils.formatDateTime(statusInfo.endTime) : 'N/A'}\n\n` +
-                        `💡 Press 'q' or ESC to return to actions menu`
-                      );
+                        `💡 Press 'q' or ESC to return to actions menu`;
                     } else {
-                      actions.setOutput(
+                      finalMessage = 
                         `⚠️ Job execution completed but final status is unclear\n\n` +
                         `📋 Status: ${statusInfo.status}\n` +
                         `🚀 Start Time: ${ParsingUtils.formatDateTime(statusInfo.startTime)}\n` +
                         `🏁 End Time: ${statusInfo.endTime ? ParsingUtils.formatDateTime(statusInfo.endTime) : 'Still running...'}\n\n` +
                         `💡 Use 'View Last Job Details' to check the actual status\n\n` +
-                        `💡 Press 'q' or ESC to return to actions menu`
-                      );
+                        `💡 Press 'q' or ESC to return to actions menu`;
                     }
+                    
+                    // Add a tiny delay to ensure smooth transition from verification message
+                    setTimeout(() => {
+                      actions.setOutput(finalMessage);
+                    }, 100);
                   } else {
                     actions.markJobCompleted(state.currentItem!.workspace, state.currentItem!.name);
                     actions.setOutput(
@@ -323,7 +358,23 @@ export const App: React.FC = () => {
             }
           },
 
-          3: () => {
+          3: async () => {
+            // Move Item to Another Workspace action
+            actions.updateState({
+              currentView: VIEWS.WORKSPACE_SELECTION,
+              selectedDestinationWorkspace: 0
+            });
+            
+            try {
+              const workspaceList = await fabricService.listWorkspaces();
+              actions.setWorkspaces(workspaceList);
+            } catch (error: any) {
+              actions.setError(error.message);
+              actions.setCurrentView(VIEWS.OUTPUT);
+            }
+          },
+
+          4: () => {
             actions.updateState({
               currentView: VIEWS.WORKSPACE_ITEMS,
               selectedItemAction: 0,
@@ -353,6 +404,67 @@ export const App: React.FC = () => {
         actions.setError(error.message);
       }
   }, [state.currentJob, fabricService, actions]);
+
+  const handleDestinationWorkspaceSelection = useCallback(async () => {
+    if (!state.currentItem || state.workspaces.length === 0) return;
+
+    // Filter out the current workspace
+    const availableWorkspaces = state.workspaces.filter(ws => ws !== state.currentItem?.workspace);
+    
+    if (state.selectedDestinationWorkspace >= availableWorkspaces.length) {
+      // Return to Item Actions selected
+      actions.updateState({
+        currentView: VIEWS.ITEM_ACTIONS,
+        selectedDestinationWorkspace: 0
+      });
+      return;
+    }
+
+    const destinationWorkspace = availableWorkspaces[state.selectedDestinationWorkspace];
+    
+    actions.setCurrentView(VIEWS.OUTPUT);
+    actions.setOutput(`🚀 Moving ${state.currentItem.name} to ${destinationWorkspace}...`);
+
+    try {
+      // Use silent execution to prevent error flickering in UI
+      await fabricService.moveItem(
+        state.currentItem.workspace,
+        destinationWorkspace,
+        state.currentItem.name
+      );
+
+      actions.setOutput(
+        `✅ Successfully moved ${state.currentItem.name}\n\n` +
+        `📂 From: ${state.currentItem.workspace}\n` +
+        `📂 To: ${destinationWorkspace}\n\n` +
+        `💡 Press 'q' or ESC to return to workspace items`
+      );
+
+      // Clear current item since it's no longer in the current workspace
+      actions.setCurrentItem(null);
+
+    } catch (error: any) {
+      const errorMessage = error.message || '';
+      
+      if (errorMessage.includes('ItemDisplayNameNotAvailableYet') || 
+          errorMessage.includes('not available yet') ||
+          errorMessage.includes('is expected to become available')) {
+        actions.setError(''); // Clear any lingering error state
+        actions.setOutput(
+          `⏳ Item move failed: Item is not available yet\n\n` +
+          `The item was recently moved and has a cooldown period before it can be moved again. This is a Fabric platform limitation.\n\n` +
+          `⏰ Please wait a few minutes and try again.\n\n` +
+          `💡 Press 'q' or ESC to return to item actions menu`
+        );
+      } else {
+        actions.setError(''); // Clear any lingering error state
+        actions.setOutput(
+          `❌ Failed to move item: ${errorMessage}\n\n` +
+          `💡 Press 'q' or ESC to return to item actions menu`
+        );
+      }
+    }
+  }, [state.currentItem, state.workspaces, state.selectedDestinationWorkspace, actions, fabricService]);
 
   const handleJobMenuSelection = useCallback(async () => {
       if (!state.currentJob) return;
@@ -472,6 +584,7 @@ export const App: React.FC = () => {
     handleWorkspaceItemSelection,
     handleItemActionSelection,
     handleJobMenuSelection,
+    handleDestinationWorkspaceSelection,
     checkJobStatus,
     refreshWorkspaces: debouncedRefreshWorkspaces
   }), [
@@ -480,6 +593,7 @@ export const App: React.FC = () => {
     handleWorkspaceItemSelection,
     handleItemActionSelection,
     handleJobMenuSelection,
+    handleDestinationWorkspaceSelection,
     checkJobStatus,
     debouncedRefreshWorkspaces
   ]);
@@ -534,6 +648,7 @@ export const App: React.FC = () => {
       workspaceName: state.workspaces[state.selectedWorkspace],
       loading: state.loading,
       error: state.error,
+      loadingProgress: state.loadingProgress,
       terminalHeight
     }),
     [VIEWS.COMMAND_HISTORY]: () => h(CommandHistory, { history: state.commandHistory }),
@@ -549,6 +664,13 @@ export const App: React.FC = () => {
     [VIEWS.JOB_STATUS]: () => h(JobStatusView, {
       output: state.output,
       jobInfo: state.currentJob!,
+      loading: state.loading,
+      error: state.error
+    }),
+    [VIEWS.WORKSPACE_SELECTION]: () => h(WorkspaceSelection, {
+      workspaces: state.workspaces.filter(ws => ws !== state.currentItem?.workspace),
+      selectedWorkspace: state.selectedDestinationWorkspace,
+      currentItem: state.currentItem,
       loading: state.loading,
       error: state.error
     }),

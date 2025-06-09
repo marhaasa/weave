@@ -62,7 +62,7 @@ export const createInputHandlers = (
   },
 
   [VIEWS.ITEM_ACTIONS]: (input: string, key: Key) => {
-    handleNavigation(key, state.selectedItemAction, 3, actions.setSelectedItemAction);
+    handleNavigation(key, state.selectedItemAction, 4, actions.setSelectedItemAction);
 
     if (key.return) handlers.handleItemActionSelection();
     else if (key.escape || input === 'q') {
@@ -70,6 +70,28 @@ export const createInputHandlers = (
         currentView: VIEWS.WORKSPACE_ITEMS,
         selectedItemAction: 0,
         currentItem: null
+        // Keep selectedWorkspaceItem unchanged to preserve cursor position
+      });
+      // Don't call handleWorkspaceSelection as it resets cursor position
+      // Only refresh if a move operation actually happened (which clears currentItem)
+    }
+  },
+
+  [VIEWS.WORKSPACE_SELECTION]: (input: string, key: Key) => {
+    if (!state.currentItem) return;
+    
+    // Filter out the current workspace to get available destinations
+    const availableWorkspaces = state.workspaces.filter(ws => ws !== state.currentItem?.workspace);
+    const maxSelection = availableWorkspaces.length; // Includes "Return to Item Actions" option
+    
+    handleNavigation(key, state.selectedDestinationWorkspace, maxSelection, actions.setSelectedDestinationWorkspace);
+
+    if (key.return) {
+      handlers.handleDestinationWorkspaceSelection();
+    } else if (key.escape || input === 'q') {
+      actions.updateState({
+        currentView: VIEWS.ITEM_ACTIONS,
+        selectedDestinationWorkspace: 0
       });
     }
   },
@@ -108,6 +130,11 @@ export const createInputHandlers = (
     if (key.escape || input === 'q') {
       if (state.currentItem) {
         actions.setCurrentView(VIEWS.ITEM_ACTIONS);
+      } else if (state.workspaces.length > 0 && state.selectedWorkspace < state.workspaces.length) {
+        // If we have workspace context (likely after a move), go back to workspace items
+        actions.setError(''); // Clear any error state before navigating
+        actions.setCurrentView(VIEWS.WORKSPACE_ITEMS);
+        handlers.handleWorkspaceSelection();
       } else {
         actions.setCurrentView(VIEWS.MAIN);
         actions.resetState();

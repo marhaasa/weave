@@ -10,6 +10,7 @@ interface WorkspaceItemsProps {
   workspaceName: string;
   loading: boolean;
   error: string;
+  loadingProgress: number;
   terminalHeight?: number;
 }
 
@@ -19,6 +20,7 @@ export const WorkspaceItems: React.FC<WorkspaceItemsProps> = React.memo(({
   workspaceName,
   loading,
   error,
+  loadingProgress,
   terminalHeight = 24
 }) => {
   const elements: ReactElement[] = [
@@ -33,8 +35,9 @@ export const WorkspaceItems: React.FC<WorkspaceItemsProps> = React.memo(({
       ),
       spacer('loading-spacer')
     );
-    // Show skeleton items while loading
-    const skeletonItems = createSkeletonList(8, 0);
+    // Show skeleton items while loading - same as workspaces
+    // Use loadingProgress to trigger re-renders (which regenerates random skeleton patterns)
+    const skeletonItems = createSkeletonList(5, -1); // -1 means no item selected
     elements.push(...skeletonItems);
   } else if (error) {
     elements.push(...createErrorDisplay(error, 'items'));
@@ -107,7 +110,7 @@ export const WorkspaceItems: React.FC<WorkspaceItemsProps> = React.memo(({
       spacer('separator'),
       createMenuItem('Return to Workspaces', items.length, selectedItem, COLORS.SECONDARY)
     );
-  } else if (!loading) {
+  } else if (!loading && items.length === 0 && loadingProgress === 0) {
     elements.push(
       createText({ key: 'no-items', color: COLORS.WARNING }, '⚠️  No items found in workspace'),
       spacer('empty-spacer'),

@@ -8,7 +8,8 @@ export const VIEWS = {
   OUTPUT: 'output',
   COMMAND_HISTORY: 'command-history',
   JOB_MENU: 'job-menu',
-  JOB_STATUS: 'job-status'
+  JOB_STATUS: 'job-status',
+  WORKSPACE_SELECTION: 'workspace-selection'
 } as const;
 
 export const COLORS = {

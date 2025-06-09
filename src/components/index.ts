@@ -9,3 +9,4 @@ export { ItemActionsMenu } from './ItemActionsMenu.js';
 export { OutputView } from './OutputView.js';
 export { WorkspaceItems } from './WorkspaceItems.js';
 export { WorkspacesList } from './WorkspacesList.js';
+export { WorkspaceSelection } from './WorkspaceSelection.js';
