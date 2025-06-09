@@ -18,3 +18,5 @@ tsconfig.tsbuildinfo
 # OS files
 .DS_Store
 
+# Claude
+CLAUDE.md
