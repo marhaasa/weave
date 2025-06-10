@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+## 0.1.20 - 2025-06-10
+
+### Fixed
+- Update README to reflect changes
+- Removed cacheing due to problems related to fab cp and fb mv
+- Clean up
+
+
 ## 0.1.19 - 2025-06-09
 
 ### Fixed
