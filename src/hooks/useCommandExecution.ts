@@ -12,20 +12,7 @@ export const useCommandExecution = (actions: Actions, config: Config | null) => 
     command: string,
     options: ExecuteCommandOptions = {}
   ): Promise<CommandResult> => {
-    const cacheKey = `${command}-${JSON.stringify(options)}`;
-
-    if (!options.skipCache) {
-      const cachedResult = actions.getCachedData<CommandResult>(cacheKey);
-      if (cachedResult) {
-        if (!options.silent) {
-          actions.setOutput(cachedResult.output);
-          if (cachedResult.error) {
-            actions.setError(cachedResult.error);
-          }
-        }
-        return cachedResult;
-      }
-    }
+    // No caching - always execute fresh commands
 
     actions.setLoading(true);
     actions.setError('');
@@ -52,9 +39,7 @@ export const useCommandExecution = (actions: Actions, config: Config | null) => 
         command
       };
 
-      if (result.success && !options.skipCache) {
-        actions.setCachedData(cacheKey, result);
-      }
+      // No caching - removed setCachedData call
 
       if (!options.silent) {
         if (result.success) {
@@ -115,10 +100,7 @@ export const useCommandExecution = (actions: Actions, config: Config | null) => 
 
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        const result = await executeCommand(command, {
-          ...options,
-          skipCache: attempt > 0
-        });
+        const result = await executeCommand(command, options);
 
         if (result.success) return result;
         lastError = result.error || '';

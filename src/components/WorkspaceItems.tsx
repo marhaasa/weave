@@ -3,6 +3,17 @@ import { createFullWidthBox, createText, createMenuItem, createLoadingDisplay, c
 import { ParsingUtils } from '../utils/parsing.js';
 import { COLORS } from '../constants/index.js';
 import type { WorkspaceItem } from '../types/index.js';
+import { appendFileSync } from 'fs';
+
+const debugLog = (message: string) => {
+  const timestamp = new Date().toISOString();
+  const logMessage = `${timestamp} - ${message}\n`;
+  try {
+    appendFileSync('/tmp/weave-debug.log', logMessage);
+  } catch (error) {
+    // Ignore file write errors
+  }
+};
 
 interface WorkspaceItemsProps {
   items: (string | WorkspaceItem)[];
@@ -14,7 +25,7 @@ interface WorkspaceItemsProps {
   terminalHeight?: number;
 }
 
-export const WorkspaceItems: React.FC<WorkspaceItemsProps> = React.memo(({
+export const WorkspaceItems: React.FC<WorkspaceItemsProps> = ({
   items,
   selectedItem,
   workspaceName,
@@ -23,6 +34,8 @@ export const WorkspaceItems: React.FC<WorkspaceItemsProps> = React.memo(({
   loadingProgress,
   terminalHeight = 24
 }) => {
+  debugLog(`WorkspaceItems rendering: ${workspaceName} with ${items.length} items: ${items.map(item => typeof item === 'string' ? item : item.name).join(', ')}`);
+  
   const elements: ReactElement[] = [
     createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, 'Workspace Items'),
     spacer()
@@ -128,4 +141,4 @@ export const WorkspaceItems: React.FC<WorkspaceItemsProps> = React.memo(({
     minHeight: 0,
     overflowY: 'hidden'
   }, elements);
-});
+};

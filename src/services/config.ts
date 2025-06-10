@@ -13,7 +13,7 @@ export const loadConfig = async (): Promise<Config> => {
     const data = await fs.readFile(CONFIG_FILE, 'utf8');
     return JSON.parse(data);
   } catch {
-    return { cacheTimeout: LIMITS.CACHE_TIMEOUT, maxRetries: LIMITS.MAX_RETRIES, theme: 'default' };
+    return { maxRetries: LIMITS.MAX_RETRIES, theme: 'default' };
   }
 };
 

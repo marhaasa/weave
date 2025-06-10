@@ -1,7 +1,6 @@
 import type { Key } from 'ink';
 
 export interface Config {
-  cacheTimeout: number;
   maxRetries: number;
   theme: string;
 }
@@ -50,10 +49,6 @@ export interface StatusInfo {
   jobType: string | null;
 }
 
-export interface CachedData<T = any> {
-  data: T;
-  timestamp: number;
-}
 
 export interface State {
   currentView: string;
@@ -75,13 +70,12 @@ export interface State {
   selectedItemAction: number;
   currentItem: ItemInfo | null;
   completedJobs: Set<string>;
-  cache: Map<string, CachedData>;
   selectedDestinationWorkspace: number;
+  isMovingItem: boolean;
 }
 
 export interface ExecuteCommandOptions {
   timeout?: number;
-  skipCache?: boolean;
   silent?: boolean;
   env?: Record<string, string>;
 }
@@ -127,8 +121,6 @@ export interface Actions {
   setSelectedItemAction: (action: number) => void;
   setCurrentItem: (item: ItemInfo | null) => void;
   addToHistory: (command: string, result: CommandResult) => Promise<void>;
-  getCachedData: <T = any>(key: string) => T | null;
-  setCachedData: <T = any>(key: string, data: T) => void;
   addActiveJob: (jobId: string, workspace: string, notebook: string) => void;
   markJobCompleted: (workspace: string, notebook: string) => void;
   setCommandHistory: (history: HistoryEntry[]) => void;
@@ -137,7 +129,7 @@ export interface Actions {
 
 export interface Handlers {
   handleMenuSelection: () => Promise<void>;
-  handleWorkspaceSelection: () => Promise<void>;
+  handleWorkspaceSelection: (forceRefresh?: boolean) => Promise<void>;
   handleWorkspaceItemSelection: () => Promise<void>;
   handleItemActionSelection: () => Promise<void>;
   handleJobMenuSelection: () => Promise<void>;

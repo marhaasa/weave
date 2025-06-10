@@ -1,51 +1,39 @@
 import { CommandBuilder } from '../utils/commandBuilder.js';
 import { ParsingUtils } from '../utils/parsing.js';
 import type { CommandResult, WorkspaceItem, JobInfo, StatusInfo, ExecuteCommandOptions } from '../types/index.js';
+import { writeFileSync, appendFileSync } from 'fs';
+
+const debugLog = (message: string) => {
+  if (!process.env.WEAVE_DEBUG) return;
+  
+  const timestamp = new Date().toISOString();
+  const logMessage = `${timestamp} - ${message}\n`;
+  try {
+    appendFileSync('/tmp/weave-debug.log', logMessage);
+  } catch (error) {
+    // Ignore file write errors
+  }
+};
 
 export class FabricService {
-  private cache = new Map<string, { data: any; timestamp: number }>();
-  private readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+  // Removed all caching
   
   constructor(
     private executeCommand: (command: string, options?: ExecuteCommandOptions) => Promise<CommandResult>
-  ) { }
-
-  private getCacheKey(type: 'workspaces' | 'workspace-items' | 'job-status' | 'job-list', ...params: string[]): string {
-    return `${type}:${params.join(':')}`;
-  }
-
-  private getCachedData<T>(key: string): T | null {
-    // Disable caching - always return null to force fresh fetches
-    return null;
-  }
-
-  private setCachedData<T>(key: string, data: T): void {
-    // Disable caching - don't store anything
-    // this.cache.set(key, { data, timestamp: Date.now() });
-  }
-
-  public invalidateCache(pattern?: string): void {
-    if (!pattern) {
-      this.cache.clear();
-      return;
-    }
-    for (const key of this.cache.keys()) {
-      if (key.includes(pattern)) {
-        this.cache.delete(key);
+  ) { 
+    // Initialize debug log only in debug mode
+    if (process.env.WEAVE_DEBUG) {
+      try {
+        writeFileSync('/tmp/weave-debug.log', `=== Weave Debug Log Started at ${new Date().toISOString()} ===\n`);
+      } catch (error) {
+        // Ignore file write errors
       }
     }
   }
+
+  // Removed all caching methods
 
   async listWorkspaces(forceRefresh = false): Promise<string[]> {
-    const cacheKey = this.getCacheKey('workspaces');
-    
-    if (!forceRefresh) {
-      const cached = this.getCachedData<string[]>(cacheKey);
-      if (cached) {
-        return cached;
-      }
-    }
-
     const command = CommandBuilder.listWorkspaces();
     const result = await this.executeCommand(command);
 
@@ -54,29 +42,24 @@ export class FabricService {
     }
 
     const workspaces = ParsingUtils.parseWorkspaces(result.output);
-    this.setCachedData(cacheKey, workspaces);
     return workspaces;
   }
 
   async listWorkspaceItems(workspace: string, forceRefresh = false): Promise<WorkspaceItem[]> {
-    const cacheKey = this.getCacheKey('workspace-items', workspace);
-    
-    if (!forceRefresh) {
-      const cached = this.getCachedData<WorkspaceItem[]>(cacheKey);
-      if (cached) {
-        return cached;
-      }
-    }
-
     const command = CommandBuilder.listWorkspace(workspace);
     const result = await this.executeCommand(command);
 
+    debugLog(`Command result success: ${result.success}`);
+    debugLog(`Command output length: ${result.output?.length || 0}`);
+
     if (!result.success) {
+      debugLog(`Command failed: ${result.error}`);
       throw new Error(`Failed to list items in ${workspace}: ${result.error || 'Unknown error'}`);
     }
 
     const items = ParsingUtils.parseWorkspaceItems(result.output);
-    this.setCachedData(cacheKey, items);
+    debugLog(`Parsed ${items.length} items for workspace ${workspace}`);
+    debugLog(`Items: ${items.map(item => item.name).join(', ')}`);
     return items;
   }
 
@@ -93,9 +76,6 @@ export class FabricService {
       throw new Error('Failed to extract job ID from output');
     }
 
-    // Invalidate job-related cache since we're starting a new job
-    this.invalidateCache(`job-list:${workspace}:${itemName}`);
-    this.invalidateCache(`job-status:${workspace}:${itemName}`);
 
     return {
       jobId,
@@ -112,7 +92,7 @@ export class FabricService {
 
   async getJobStatus(workspace: string, itemName: string, jobId: string): Promise<StatusInfo> {
     const command = CommandBuilder.job.status(workspace, itemName, jobId);
-    const result = await this.executeCommand(command, { skipCache: true });
+    const result = await this.executeCommand(command);
 
     if (!result.success) {
       throw new Error(`Failed to get job status: ${result.error || 'Unknown error'}`);
@@ -121,31 +101,23 @@ export class FabricService {
     return ParsingUtils.parseJobStatus(result.output);
   }
 
-  async getJobList(workspace: string, itemName: string, useCache = true): Promise<string | null> {
-    const cacheKey = this.getCacheKey('job-list', workspace, itemName);
-    
-    if (useCache) {
-      const cached = this.getCachedData<string | null>(cacheKey);
-      if (cached !== null) {
-        return cached;
-      }
-    }
-
+  async getJobList(workspace: string, itemName: string): Promise<string | null> {
     const command = CommandBuilder.job.list(workspace, itemName);
-    const result = await this.executeCommand(command, { skipCache: true, silent: true });
+    const result = await this.executeCommand(command, { silent: true });
 
     if (!result.success) {
       throw new Error(`Failed to get job list: ${result.error || 'Unknown error'}`);
     }
 
     const jobId = ParsingUtils.extractGuid(result.output);
-    this.setCachedData(cacheKey, jobId);
     return jobId;
   }
 
   async moveItem(fromWorkspace: string, toWorkspace: string, itemName: string): Promise<CommandResult> {
     const command = CommandBuilder.moveItem(fromWorkspace, toWorkspace, itemName);
+    debugLog(`Move command: ${command}`);
     const result = await this.executeCommand(command, { silent: true });
+    debugLog(`Move result success: ${result.success}`);
 
     if (!result.success) {
       const errorInfo = result.error || result.output || 'Unknown error';
@@ -159,6 +131,30 @@ export class FabricService {
         throw new Error(`Failed to move item: ${result.error}`);
       } else {
         throw new Error(`Failed to move item: ${errorInfo}`);
+      }
+    }
+
+    return result;
+  }
+
+  async copyItem(fromWorkspace: string, toWorkspace: string, itemName: string): Promise<CommandResult> {
+    const command = CommandBuilder.copyItem(fromWorkspace, toWorkspace, itemName);
+    debugLog(`Copy command: ${command}`);
+    const result = await this.executeCommand(command, { silent: true });
+    debugLog(`Copy result success: ${result.success}`);
+
+    if (!result.success) {
+      const errorInfo = result.error || result.output || 'Unknown error';
+      
+      // Check if this is a cooldown error and include the stderr details
+      if (result.error && (
+          result.error.includes('ItemDisplayNameNotAvailableYet') || 
+          result.error.includes('not available yet') ||
+          result.error.includes('is expected to become available')
+      )) {
+        throw new Error(`Failed to copy item: ${result.error}`);
+      } else {
+        throw new Error(`Failed to copy item: ${errorInfo}`);
       }
     }
 

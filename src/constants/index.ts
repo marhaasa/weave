@@ -34,7 +34,6 @@ export const TIMEOUTS = {
 } as const;
 
 export const LIMITS = {
-  CACHE_TIMEOUT: 300000,
   MAX_RETRIES: 2,
   PROGRESS_INCREMENT: 10,
   PROGRESS_MAX: 90,

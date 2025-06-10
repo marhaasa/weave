@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import type { State, Actions, CommandResult, HistoryEntry, Config, JobInfo, ItemInfo, WorkspaceItem, CachedData } from '../types/index.js';
+import type { State, Actions, CommandResult, HistoryEntry, Config, JobInfo, ItemInfo, WorkspaceItem } from '../types/index.js';
 import { VIEWS, LIMITS } from '../constants/index.js';
 import { loadConfig } from '../services/config.js';
 import { HistoryManager } from '../services/history.js';
@@ -24,8 +24,8 @@ const createInitialState = (): State => ({
   selectedItemAction: 0,
   currentItem: null,
   completedJobs: new Set(),
-  cache: new Map(),
-  selectedDestinationWorkspace: 0
+  selectedDestinationWorkspace: 0,
+  isMovingItem: true
 });
 
 export const useWeaveState = (): { state: State; actions: Actions } => {
@@ -46,7 +46,6 @@ export const useWeaveState = (): { state: State; actions: Actions } => {
       ...createInitialState(),
       config: prev.config,
       commandHistory: prev.commandHistory,
-      cache: prev.cache
     })),
 
     setCurrentView: (view: string) => setState(prev => ({ ...prev, currentView: view })),
@@ -78,22 +77,6 @@ export const useWeaveState = (): { state: State; actions: Actions } => {
       });
     },
 
-    getCachedData: <T = any>(key: string): T | null => {
-      const cached = state.cache.get(key);
-      const timeout = state.config?.cacheTimeout || LIMITS.CACHE_TIMEOUT;
-      if (cached && Date.now() - cached.timestamp < timeout) {
-        return cached.data as T;
-      }
-      return null;
-    },
-
-    setCachedData: <T = any>(key: string, data: T) => {
-      setState(prev => {
-        const newCache = new Map(prev.cache);
-        newCache.set(key, { data, timestamp: Date.now() });
-        return { ...prev, cache: newCache };
-      });
-    },
 
     addActiveJob: (jobId: string, workspace: string, notebook: string) => {
       setState(prev => ({
@@ -112,7 +95,7 @@ export const useWeaveState = (): { state: State; actions: Actions } => {
 
     setCommandHistory: (history: HistoryEntry[]) => setState(prev => ({ ...prev, commandHistory: history })),
     setSelectedDestinationWorkspace: (index: number) => setState(prev => ({ ...prev, selectedDestinationWorkspace: index }))
-  }), [state.cache, state.config]);
+  }), [state.config]);
 
   return { state, actions };
 };

@@ -4,6 +4,8 @@ export const CommandBuilder = {
   listWorkspace: (workspace: string): string => `fab ls "${workspace}.Workspace"`,
   moveItem: (fromWorkspace: string, toWorkspace: string, itemName: string): string =>
     `fab mv -f "/${fromWorkspace}.Workspace/${itemName}" "/${toWorkspace}.Workspace/${itemName}"`,
+  copyItem: (fromWorkspace: string, toWorkspace: string, itemName: string): string =>
+    `fab cp -f "/${fromWorkspace}.Workspace/${itemName}" "/${toWorkspace}.Workspace/${itemName}"`,
 
   job: {
     start: (workspace: string, itemName: string): string =>

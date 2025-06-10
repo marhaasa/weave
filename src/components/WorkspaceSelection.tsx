@@ -9,6 +9,7 @@ interface WorkspaceSelectionProps {
   error: string;
   currentItem: { name: string; workspace: string } | null;
   terminalHeight?: number;
+  isMovingItem: boolean;
 }
 
 export const WorkspaceSelection: React.FC<WorkspaceSelectionProps> = React.memo(({
@@ -17,17 +18,21 @@ export const WorkspaceSelection: React.FC<WorkspaceSelectionProps> = React.memo(
   loading,
   error,
   currentItem,
-  terminalHeight = 24
+  terminalHeight = 24,
+  isMovingItem
 }) => {
+  const operation = isMovingItem ? 'Move' : 'Copy';
+  const operationVerb = isMovingItem ? 'Moving' : 'Copying';
+  
   const elements: ReactElement[] = [
-    createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, 'Move Item to Workspace'),
+    createText({ key: 'title', bold: true, color: COLORS.PRIMARY }, `${operation} Item to Workspace`),
     spacer()
   ];
 
   if (currentItem) {
     elements.push(
       createText({ key: 'item-info', color: COLORS.PRIMARY }, 
-        `📝 Moving: ${currentItem.name}`
+        `📝 ${operationVerb}: ${currentItem.name}`
       ),
       createText({ key: 'from-info', color: COLORS.SECONDARY }, 
         `📂 From: ${currentItem.workspace}`

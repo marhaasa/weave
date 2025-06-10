@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useInput, useApp, useStdout } from 'ink';
 import { spawn } from 'child_process';
 import type { Key } from 'ink';
+import { appendFileSync } from 'fs';
 
 
 // Hooks
@@ -33,6 +34,18 @@ import { VIEWS, TIMEOUTS, LIMITS } from './constants/index.js';
 import type { MenuOption, Handlers } from './types/index.js';
 import { FabricService } from './services/fabricService.js';
 
+const debugLog = (message: string) => {
+  if (!process.env.WEAVE_DEBUG) return;
+  
+  const timestamp = new Date().toISOString();
+  const logMessage = `${timestamp} - ${message}\n`;
+  try {
+    appendFileSync('/tmp/weave-debug.log', logMessage);
+  } catch (error) {
+    // Ignore file write errors
+  }
+};
+
 export const App: React.FC = () => {
   const { state, actions } = useWeaveState();
   const { executeCommand, executeCommandWithRetry, executeCommandWithStatusUpdates } = useCommandExecution(actions, state.config);
@@ -59,9 +72,6 @@ export const App: React.FC = () => {
     }, [state.currentJob]),
     onJobCompleted: useCallback((workspace: string, itemName: string) => {
       actions.markJobCompleted(workspace, itemName);
-      // Invalidate related caches to get fresh status on next query
-      fabricService.invalidateCache(`job-list:${workspace}:${itemName}`);
-      fabricService.invalidateCache(`job-status:${workspace}:${itemName}`);
     }, [actions, fabricService])
   });
 
@@ -138,11 +148,13 @@ export const App: React.FC = () => {
     { label: 'Exit', action: 'exit' }
   ];
 
-  const handleWorkspaceSelection = useCallback(async () => {
+  const handleWorkspaceSelection = useCallback(async (forceRefresh = false) => {
         if (state.workspaces.length === 0) return;
 
         const selectedWorkspaceName = state.workspaces[state.selectedWorkspace];
+        debugLog(`handleWorkspaceSelection called for: ${selectedWorkspaceName}`);
 
+        // Always clear existing items and show we're loading fresh data
         actions.updateState({
           currentView: VIEWS.WORKSPACE_ITEMS,
           workspaceItems: [],
@@ -165,12 +177,12 @@ export const App: React.FC = () => {
         }, 200);
 
         try {
-          const items = await fabricService.listWorkspaceItems(selectedWorkspaceName);
+          const items = await fabricService.listWorkspaceItems(selectedWorkspaceName, forceRefresh);
           clearTimeout(loadingTimer);
           if ((loadingTimer as any).progressTimer) {
             clearInterval((loadingTimer as any).progressTimer);
           }
-          // Set items and loading state atomically to prevent flicker
+          
           actions.updateState({
             workspaceItems: items,
             loading: false,
@@ -362,7 +374,8 @@ export const App: React.FC = () => {
             // Move Item to Another Workspace action
             actions.updateState({
               currentView: VIEWS.WORKSPACE_SELECTION,
-              selectedDestinationWorkspace: 0
+              selectedDestinationWorkspace: 0,
+              isMovingItem: true
             });
             
             try {
@@ -374,7 +387,24 @@ export const App: React.FC = () => {
             }
           },
 
-          4: () => {
+          4: async () => {
+            // Copy Item to Another Workspace action
+            actions.updateState({
+              currentView: VIEWS.WORKSPACE_SELECTION,
+              selectedDestinationWorkspace: 0,
+              isMovingItem: false
+            });
+            
+            try {
+              const workspaceList = await fabricService.listWorkspaces();
+              actions.setWorkspaces(workspaceList);
+            } catch (error: any) {
+              actions.setError(error.message);
+              actions.setCurrentView(VIEWS.OUTPUT);
+            }
+          },
+
+          5: () => {
             actions.updateState({
               currentView: VIEWS.WORKSPACE_ITEMS,
               selectedItemAction: 0,
@@ -421,27 +451,41 @@ export const App: React.FC = () => {
     }
 
     const destinationWorkspace = availableWorkspaces[state.selectedDestinationWorkspace];
+    const operation = state.isMovingItem ? 'move' : 'copy';
+    const operationVerb = state.isMovingItem ? 'Moving' : 'Copying';
+    const operationPastTense = state.isMovingItem ? 'moved' : 'copied';
     
     actions.setCurrentView(VIEWS.OUTPUT);
-    actions.setOutput(`🚀 Moving ${state.currentItem.name} to ${destinationWorkspace}...`);
+    actions.setOutput(`🚀 ${operationVerb} ${state.currentItem.name} to ${destinationWorkspace}...`);
 
     try {
       // Use silent execution to prevent error flickering in UI
-      await fabricService.moveItem(
-        state.currentItem.workspace,
-        destinationWorkspace,
-        state.currentItem.name
-      );
+      if (state.isMovingItem) {
+        await fabricService.moveItem(
+          state.currentItem.workspace,
+          destinationWorkspace,
+          state.currentItem.name
+        );
+      } else {
+        await fabricService.copyItem(
+          state.currentItem.workspace,
+          destinationWorkspace,
+          state.currentItem.name
+        );
+      }
 
       actions.setOutput(
-        `✅ Successfully moved ${state.currentItem.name}\n\n` +
+        `✅ Successfully ${operationPastTense} ${state.currentItem.name}\n\n` +
         `📂 From: ${state.currentItem.workspace}\n` +
         `📂 To: ${destinationWorkspace}\n\n` +
         `💡 Press 'q' or ESC to return to workspace items`
       );
 
-      // Clear current item since it's no longer in the current workspace
-      actions.setCurrentItem(null);
+      // Update state based on operation type
+      if (state.isMovingItem) {
+        // Clear current item for move (since it's no longer in the current workspace)
+        actions.setCurrentItem(null);
+      }
 
     } catch (error: any) {
       const errorMessage = error.message || '';
@@ -451,20 +495,20 @@ export const App: React.FC = () => {
           errorMessage.includes('is expected to become available')) {
         actions.setError(''); // Clear any lingering error state
         actions.setOutput(
-          `⏳ Item move failed: Item is not available yet\n\n` +
-          `The item was recently moved and has a cooldown period before it can be moved again. This is a Fabric platform limitation.\n\n` +
+          `⏳ Item ${operation} failed: Item is not available yet\n\n` +
+          `The item was recently ${operationPastTense} and has a cooldown period before it can be ${operationPastTense} again. This is a Fabric platform limitation.\n\n` +
           `⏰ Please wait a few minutes and try again.\n\n` +
           `💡 Press 'q' or ESC to return to item actions menu`
         );
       } else {
         actions.setError(''); // Clear any lingering error state
         actions.setOutput(
-          `❌ Failed to move item: ${errorMessage}\n\n` +
+          `❌ Failed to ${operation} item: ${errorMessage}\n\n` +
           `💡 Press 'q' or ESC to return to item actions menu`
         );
       }
     }
-  }, [state.currentItem, state.workspaces, state.selectedDestinationWorkspace, actions, fabricService]);
+  }, [state.currentItem, state.workspaces, state.selectedDestinationWorkspace, state.isMovingItem, actions, fabricService]);
 
   const handleJobMenuSelection = useCallback(async () => {
       if (!state.currentJob) return;
@@ -580,7 +624,7 @@ export const App: React.FC = () => {
 
   const handlers: Handlers = useMemo(() => ({
     handleMenuSelection,
-    handleWorkspaceSelection: debouncedWorkspaceSelection,
+    handleWorkspaceSelection,
     handleWorkspaceItemSelection,
     handleItemActionSelection,
     handleJobMenuSelection,
@@ -589,7 +633,7 @@ export const App: React.FC = () => {
     refreshWorkspaces: debouncedRefreshWorkspaces
   }), [
     handleMenuSelection,
-    debouncedWorkspaceSelection,
+    handleWorkspaceSelection,
     handleWorkspaceItemSelection,
     handleItemActionSelection,
     handleJobMenuSelection,
@@ -672,7 +716,8 @@ export const App: React.FC = () => {
       selectedWorkspace: state.selectedDestinationWorkspace,
       currentItem: state.currentItem,
       loading: state.loading,
-      error: state.error
+      error: state.error,
+      isMovingItem: state.isMovingItem
     }),
     [VIEWS.OUTPUT]: () => h(OutputView, {
       output: state.output,

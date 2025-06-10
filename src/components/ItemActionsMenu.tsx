@@ -44,7 +44,8 @@ export const ItemActionsMenu: React.FC<ItemActionsMenuProps> = React.memo(({
     'Run (Start job in background)',
     'Run Job Synchronously (Wait for completion)',
     'View Last Job Details',
-    'Move Item to Another Workspace'
+    'Move Item to Another Workspace',
+    'Copy Item to Another Workspace'
   ];
 
   options.forEach((option, index) => {

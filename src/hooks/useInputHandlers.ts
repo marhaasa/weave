@@ -3,6 +3,19 @@ import type { State, Actions, Handlers, InputHandler } from '../types/index.js';
 import { VIEWS } from '../constants/index.js';
 import { handleNavigation } from '../utils/navigation.js';
 import { HistoryManager } from '../services/history.js';
+import { appendFileSync } from 'fs';
+
+const debugLog = (message: string) => {
+  if (!process.env.WEAVE_DEBUG) return;
+  
+  const timestamp = new Date().toISOString();
+  const logMessage = `${timestamp} - ${message}\n`;
+  try {
+    appendFileSync('/tmp/weave-debug.log', logMessage);
+  } catch (error) {
+    // Ignore file write errors
+  }
+};
 
 export const createInputHandlers = (
   state: State,
@@ -62,7 +75,7 @@ export const createInputHandlers = (
   },
 
   [VIEWS.ITEM_ACTIONS]: (input: string, key: Key) => {
-    handleNavigation(key, state.selectedItemAction, 4, actions.setSelectedItemAction);
+    handleNavigation(key, state.selectedItemAction, 5, actions.setSelectedItemAction);
 
     if (key.return) handlers.handleItemActionSelection();
     else if (key.escape || input === 'q') {
@@ -131,8 +144,7 @@ export const createInputHandlers = (
       if (state.currentItem) {
         actions.setCurrentView(VIEWS.ITEM_ACTIONS);
       } else if (state.workspaces.length > 0 && state.selectedWorkspace < state.workspaces.length) {
-        // If we have workspace context (likely after a move), go back to workspace items
-        actions.setError(''); // Clear any error state before navigating
+        // Simple: just go back to workspace items
         actions.setCurrentView(VIEWS.WORKSPACE_ITEMS);
         handlers.handleWorkspaceSelection();
       } else {
