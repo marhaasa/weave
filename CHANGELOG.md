@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+## 0.2.0 - 2025-06-11
+
+### Added
+- Added ability to import items from local drive to selected workspace
+- Added ability to export selected item to local drive
+
+
 ## 0.1.20 - 2025-06-10
 
 ### Fixed
