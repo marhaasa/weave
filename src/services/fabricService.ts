@@ -160,4 +160,32 @@ export class FabricService {
 
     return result;
   }
+
+  async exportItem(workspace: string, itemName: string, outputPath: string): Promise<CommandResult> {
+    const command = CommandBuilder.exportItem(workspace, itemName, outputPath);
+    debugLog(`Export command: ${command}`);
+    const result = await this.executeCommand(command, { silent: true });
+    debugLog(`Export result success: ${result.success}`);
+
+    if (!result.success) {
+      const errorInfo = result.error || result.output || 'Unknown error';
+      throw new Error(`Failed to export item: ${errorInfo}`);
+    }
+
+    return result;
+  }
+
+  async importItem(workspace: string, itemName: string, inputPath: string): Promise<CommandResult> {
+    const command = CommandBuilder.importItem(workspace, itemName, inputPath);
+    debugLog(`Import command: ${command}`);
+    const result = await this.executeCommand(command, { silent: true });
+    debugLog(`Import result success: ${result.success}`);
+
+    if (!result.success) {
+      const errorInfo = result.error || result.output || 'Unknown error';
+      throw new Error(`Failed to import item: ${errorInfo}`);
+    }
+
+    return result;
+  }
 }

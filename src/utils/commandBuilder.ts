@@ -16,5 +16,11 @@ export const CommandBuilder = {
       `fab job run-status /${workspace}.Workspace/${itemName} --id ${jobId}`,
     list: (workspace: string, itemName: string): string =>
       `fab job run-list /${workspace}.Workspace/${itemName}`
-  }
+  },
+
+  exportItem: (workspace: string, itemName: string, outputPath: string): string =>
+    `fab export ${workspace}.Workspace/${itemName} -o "${outputPath}" -f`,
+  
+  importItem: (workspace: string, itemName: string, inputPath: string): string =>
+    `fab import ${workspace}.Workspace/${itemName} -i "${inputPath}" -f`
 };

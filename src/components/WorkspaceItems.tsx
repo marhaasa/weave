@@ -121,7 +121,9 @@ export const WorkspaceItems: React.FC<WorkspaceItemsProps> = ({
 
     elements.push(
       spacer('separator'),
-      createMenuItem('Return to Workspaces', items.length, selectedItem, COLORS.SECONDARY)
+      createMenuItem('Import Item from File', items.length, selectedItem, COLORS.SUCCESS_BG),
+      spacer('import-spacer'),
+      createMenuItem('Return to Workspaces', items.length + 1, selectedItem, COLORS.SECONDARY)
     );
   } else if (!loading && items.length === 0 && loadingProgress === 0) {
     elements.push(

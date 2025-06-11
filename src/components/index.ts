@@ -1,5 +1,6 @@
 export { AnimatedWeaveTitle } from './AnimatedWeaveTitle.js';
 export { CommandHistory } from './CommandHistory.js';
+export { FilePathInput } from './FilePathInput.js';
 export { JobMenu } from './JobMenu.js';
 export { JobStatusView } from './JobStatusView.js';
 export { LoadingOrError } from './LoadingOrError.js';
@@ -7,6 +8,7 @@ export { LoadingScreen } from './LoadingScreen.js';
 export { MainMenu } from './MainMenu.js';
 export { ItemActionsMenu } from './ItemActionsMenu.js';
 export { OutputView } from './OutputView.js';
+export { TextInput } from './TextInput.js';
 export { WorkspaceItems } from './WorkspaceItems.js';
 export { WorkspacesList } from './WorkspacesList.js';
 export { WorkspaceSelection } from './WorkspaceSelection.js';

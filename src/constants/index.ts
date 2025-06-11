@@ -9,7 +9,10 @@ export const VIEWS = {
   COMMAND_HISTORY: 'command-history',
   JOB_MENU: 'job-menu',
   JOB_STATUS: 'job-status',
-  WORKSPACE_SELECTION: 'workspace-selection'
+  WORKSPACE_SELECTION: 'workspace-selection',
+  EXPORT_PATH_INPUT: 'export-path-input',
+  IMPORT_PATH_INPUT: 'import-path-input',
+  TEXT_INPUT: 'text-input'
 } as const;
 
 export const COLORS = {

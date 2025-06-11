@@ -25,6 +25,8 @@ import { JobMenu } from './components/JobMenu.js';
 import { JobStatusView } from './components/JobStatusView.js';
 import { OutputView } from './components/OutputView.js';
 import { WorkspaceSelection } from './components/WorkspaceSelection.js';
+import { FilePathInput } from './components/FilePathInput.js';
+import { TextInput } from './components/TextInput.js';
 
 // Utils and Constants
 import { h, createBox } from './utils/uiHelpers.js';
@@ -59,6 +61,43 @@ export const App: React.FC = () => {
     const timer = setTimeout(() => setShowLoadingScreen(false), TIMEOUTS.LOADING_SCREEN);
     return () => clearTimeout(timer);
   }, []);
+
+  // Watch for import trigger and execute import when conditions are met
+  useEffect(() => {
+    if (state.selectedPathOption === 777 && state.importItemName && state.importPath && state.currentView === VIEWS.OUTPUT) {
+      // Execute the import
+      const executeImportNow = async () => {
+        try {
+          const selectedWorkspaceName = state.workspaces[state.selectedWorkspace];
+          await fabricService.importItem(
+            selectedWorkspaceName,
+            state.importItemName,
+            state.importPath
+          );
+
+          actions.setOutput(
+            `✅ Successfully imported ${state.importItemName}\n\n` +
+            `📂 From: ${state.importPath}\n` +
+            `📂 To: ${selectedWorkspaceName}\n\n` +
+            `💡 Press 'q' or ESC to return to workspace items`
+          );
+
+          // Don't auto-refresh here - let user see success message
+          // Refresh will happen when user navigates back to workspace items
+        } catch (error: any) {
+          actions.setOutput(
+            `❌ Failed to import item: ${error.message}\n\n` +
+            `💡 Press 'q' or ESC to return to workspace items`
+          );
+        } finally {
+          // Reset the trigger flag
+          actions.setSelectedPathOption(0);
+        }
+      };
+
+      executeImportNow();
+    }
+  }, [state.selectedPathOption, state.importItemName, state.importPath, state.currentView, state.workspaces, state.selectedWorkspace, actions, fabricService]);
 
   // Job polling to track active job statuses
   useSmartJobPolling({
@@ -201,6 +240,25 @@ export const App: React.FC = () => {
     }, [state.workspaces, state.selectedWorkspace, actions, fabricService]);
 
   const handleWorkspaceItemSelection = useCallback(async () => {
+        // Check for import option first
+        if (state.selectedWorkspaceItem === state.workspaceItems.length) {
+          // Import Item from File option selected
+          actions.updateState({
+            currentView: VIEWS.IMPORT_PATH_INPUT,
+            selectedPathOption: 0,
+            importPath: '/tmp',
+            importItemName: ''
+          });
+          return;
+        }
+
+        // Check for return to workspaces option
+        if (state.selectedWorkspaceItem === state.workspaceItems.length + 1) {
+          // Return to Workspaces option selected
+          actions.setCurrentView(VIEWS.WORKSPACES);
+          return;
+        }
+
         if (state.workspaceItems.length === 0) return;
 
         const selectedItem = state.workspaceItems[state.selectedWorkspaceItem];
@@ -370,7 +428,16 @@ export const App: React.FC = () => {
             }
           },
 
-          3: async () => {
+          3: () => {
+            // Export Item to File action
+            actions.updateState({
+              currentView: VIEWS.EXPORT_PATH_INPUT,
+              selectedPathOption: 0,
+              exportPath: '/tmp'
+            });
+          },
+
+          4: async () => {
             // Move Item to Another Workspace action
             actions.updateState({
               currentView: VIEWS.WORKSPACE_SELECTION,
@@ -387,7 +454,7 @@ export const App: React.FC = () => {
             }
           },
 
-          4: async () => {
+          5: async () => {
             // Copy Item to Another Workspace action
             actions.updateState({
               currentView: VIEWS.WORKSPACE_SELECTION,
@@ -404,7 +471,7 @@ export const App: React.FC = () => {
             }
           },
 
-          5: () => {
+          6: () => {
             actions.updateState({
               currentView: VIEWS.WORKSPACE_ITEMS,
               selectedItemAction: 0,
@@ -618,6 +685,124 @@ export const App: React.FC = () => {
     }
   }, [fabricService, actions]);
 
+  const handleExportPathSelection = useCallback(async () => {
+    if (!state.currentItem) return;
+
+    const pathOptionHandlers: Record<number, () => void> = {
+      0: () => {
+        // Edit Path Manually
+        actions.updateState({
+          currentView: VIEWS.TEXT_INPUT,
+          textInputValue: state.exportPath,
+          textInputContext: 'export'
+        });
+      },
+      1: () => {
+        // Use Default Path (/tmp)
+        actions.setExportPath('/tmp');
+      },
+      2: async () => {
+        // Confirm and Continue
+        actions.setCurrentView(VIEWS.OUTPUT);
+        actions.setOutput(`📤 Exporting ${state.currentItem!.name} to ${state.exportPath}...`);
+
+        try {
+          await fabricService.exportItem(
+            state.currentItem!.workspace,
+            state.currentItem!.name,
+            state.exportPath
+          );
+
+          actions.setOutput(
+            `✅ Successfully exported ${state.currentItem!.name}\n\n` +
+            `📂 Location: ${state.exportPath}\n\n` +
+            `💡 Press 'q' or ESC to return to item actions menu`
+          );
+        } catch (error: any) {
+          actions.setOutput(
+            `❌ Failed to export item: ${error.message}\n\n` +
+            `💡 Press 'q' or ESC to return to item actions menu`
+          );
+        }
+      },
+      3: () => {
+        // Cancel / Go Back
+        actions.setCurrentView(VIEWS.ITEM_ACTIONS);
+      }
+    };
+
+    const handler = pathOptionHandlers[state.selectedPathOption];
+    if (handler) await handler();
+  }, [state.currentItem, state.selectedPathOption, state.exportPath, actions, fabricService]);
+
+  const handleImportPathSelection = useCallback(async () => {
+    const pathOptionHandlers: Record<number, () => void> = {
+      0: () => {
+        // Edit Path Manually
+        actions.updateState({
+          currentView: VIEWS.TEXT_INPUT,
+          textInputValue: state.importPath,
+          textInputContext: 'import'
+        });
+      },
+      1: () => {
+        // Use Default Path (/tmp)
+        actions.setImportPath('/tmp');
+      },
+      2: async () => {
+        // Confirm and Continue - first need item name
+        if (!state.importItemName) {
+          // Prompt for item name first
+          actions.updateState({
+            currentView: VIEWS.TEXT_INPUT,
+            textInputValue: '',
+            textInputContext: 'importName'
+          });
+          return;
+        }
+
+        actions.setCurrentView(VIEWS.OUTPUT);
+        actions.setOutput(`📥 Importing ${state.importItemName} from ${state.importPath}...`);
+
+        try {
+          const selectedWorkspaceName = state.workspaces[state.selectedWorkspace];
+          await fabricService.importItem(
+            selectedWorkspaceName,
+            state.importItemName,
+            state.importPath
+          );
+
+          actions.setOutput(
+            `✅ Successfully imported ${state.importItemName}\n\n` +
+            `📂 From: ${state.importPath}\n` +
+            `📂 To: ${selectedWorkspaceName}\n\n` +
+            `💡 Press 'q' or ESC to return to workspace items`
+          );
+
+          // Don't auto-refresh here - let user see success message
+          // Refresh will happen when user navigates back to workspace items
+        } catch (error: any) {
+          actions.setOutput(
+            `❌ Failed to import item: ${error.message}\n\n` +
+            `💡 Press 'q' or ESC to return to workspace items`
+          );
+        }
+      },
+      3: () => {
+        // Cancel / Go Back
+        actions.setCurrentView(VIEWS.WORKSPACE_ITEMS);
+      }
+    };
+
+    const handler = pathOptionHandlers[state.selectedPathOption];
+    if (handler) await handler();
+  }, [state.selectedPathOption, state.importPath, state.importItemName, state.workspaces, state.selectedWorkspace, actions, fabricService]);
+
+  const handleTextInput = useCallback(async () => {
+    // This will be handled by the TextInput component's input handlers
+  }, []);
+
+
   // Debounced versions of handlers to prevent excessive API calls
   const debouncedWorkspaceSelection = useDebouncedAsync(handleWorkspaceSelection, 200);
   const debouncedRefreshWorkspaces = useDebouncedAsync(refreshWorkspaces, 500);
@@ -629,6 +814,9 @@ export const App: React.FC = () => {
     handleItemActionSelection,
     handleJobMenuSelection,
     handleDestinationWorkspaceSelection,
+    handleExportPathSelection,
+    handleImportPathSelection,
+    handleTextInput,
     checkJobStatus,
     refreshWorkspaces: debouncedRefreshWorkspaces
   }), [
@@ -638,6 +826,9 @@ export const App: React.FC = () => {
     handleItemActionSelection,
     handleJobMenuSelection,
     handleDestinationWorkspaceSelection,
+    handleExportPathSelection,
+    handleImportPathSelection,
+    handleTextInput,
     checkJobStatus,
     debouncedRefreshWorkspaces
   ]);
@@ -726,6 +917,24 @@ export const App: React.FC = () => {
       title: state.currentItem ? 'Job Output' : menuOptions[state.selectedOption]?.label,
       activeJobs: state.activeJobs,
       currentItem: state.currentItem
+    }),
+    [VIEWS.EXPORT_PATH_INPUT]: () => h(FilePathInput, {
+      title: 'Export Item - Set Output Path',
+      currentPath: state.exportPath,
+      selectedOption: state.selectedPathOption,
+      onPathChange: (path: string) => actions.setExportPath(path)
+    }),
+    [VIEWS.IMPORT_PATH_INPUT]: () => h(FilePathInput, {
+      title: 'Import Item - Set Input Path',
+      currentPath: state.importPath,
+      selectedOption: state.selectedPathOption,
+      onPathChange: (path: string) => actions.setImportPath(path)
+    }),
+    [VIEWS.TEXT_INPUT]: () => h(TextInput, {
+      title: state.textInputContext === 'importName' ? 'Enter Item Name' : 'Enter Path',
+      placeholder: state.textInputContext === 'importName' ? 'Enter item name (extension auto-added if omitted)...' : 'Enter file path...',
+      instructions: state.textInputContext === 'importName' ? 'Type the item name, Enter to confirm, Escape to cancel' : 'Type your path, Enter to confirm, Escape to cancel',
+      value: state.textInputValue
     })
   };
 

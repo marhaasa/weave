@@ -25,7 +25,13 @@ const createInitialState = (): State => ({
   currentItem: null,
   completedJobs: new Set(),
   selectedDestinationWorkspace: 0,
-  isMovingItem: true
+  isMovingItem: true,
+  exportPath: '',
+  importPath: '',
+  importItemName: '',
+  selectedPathOption: 0,
+  textInputValue: '',
+  textInputContext: ''
 });
 
 export const useWeaveState = (): { state: State; actions: Actions } => {
@@ -94,7 +100,13 @@ export const useWeaveState = (): { state: State; actions: Actions } => {
     },
 
     setCommandHistory: (history: HistoryEntry[]) => setState(prev => ({ ...prev, commandHistory: history })),
-    setSelectedDestinationWorkspace: (index: number) => setState(prev => ({ ...prev, selectedDestinationWorkspace: index }))
+    setSelectedDestinationWorkspace: (index: number) => setState(prev => ({ ...prev, selectedDestinationWorkspace: index })),
+    setExportPath: (path: string) => setState(prev => ({ ...prev, exportPath: path })),
+    setImportPath: (path: string) => setState(prev => ({ ...prev, importPath: path })),
+    setImportItemName: (name: string) => setState(prev => ({ ...prev, importItemName: name })),
+    setSelectedPathOption: (option: number) => setState(prev => ({ ...prev, selectedPathOption: option })),
+    setTextInputValue: (value: string) => setState(prev => ({ ...prev, textInputValue: value })),
+    setTextInputContext: (context: string) => setState(prev => ({ ...prev, textInputContext: context }))
   }), [state.config]);
 
   return { state, actions };

@@ -72,6 +72,12 @@ export interface State {
   completedJobs: Set<string>;
   selectedDestinationWorkspace: number;
   isMovingItem: boolean;
+  exportPath: string;
+  importPath: string;
+  importItemName: string;
+  selectedPathOption: number;
+  textInputValue: string;
+  textInputContext: string;
 }
 
 export interface ExecuteCommandOptions {
@@ -125,6 +131,12 @@ export interface Actions {
   markJobCompleted: (workspace: string, notebook: string) => void;
   setCommandHistory: (history: HistoryEntry[]) => void;
   setSelectedDestinationWorkspace: (index: number) => void;
+  setExportPath: (path: string) => void;
+  setImportPath: (path: string) => void;
+  setImportItemName: (name: string) => void;
+  setSelectedPathOption: (option: number) => void;
+  setTextInputValue: (value: string) => void;
+  setTextInputContext: (context: string) => void;
 }
 
 export interface Handlers {
@@ -136,6 +148,9 @@ export interface Handlers {
   checkJobStatus: () => Promise<void>;
   refreshWorkspaces: () => Promise<void>;
   handleDestinationWorkspaceSelection: () => Promise<void>;
+  handleExportPathSelection: () => Promise<void>;
+  handleImportPathSelection: () => Promise<void>;
+  handleTextInput: () => Promise<void>;
 }
 
 export type ViewType = string;
