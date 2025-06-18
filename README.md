@@ -16,7 +16,7 @@ An interactive Terminal User Interface (TUI) for [Microsoft Fabric CLI](https://
 Install directly from the custom tap:
 ```bash
 brew tap marhaasa/tools
-brew install weave
+brew install marhaasa/tools/weave
 ```
 
 ### Option 2: From Source
